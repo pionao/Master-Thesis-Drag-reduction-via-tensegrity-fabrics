@@ -33,13 +33,21 @@ SUBROUTINE X_comp(ARRAY(*) OF REAL X^; INTEGER n_N_dof; INTEGER n_N; INTEGER n_G
         per_dir    = ghost_nodes(i, 3)
 
         IF per_dir = 1 THEN
-            X(3*ghost_ind-1) = X_0(3*parent_ind-1) - ny*l_per
+            X(3*ghost_ind-2) = X(3*parent_ind-2)
+            X(3*ghost_ind-1) = X(3*parent_ind-1) - ny*l_per
+            X(3*ghost_ind)   = X(3*parent_ind)
         ELSE IF per_dir = 2 THEN
-            X(3*ghost_ind-2) = X_0(3*parent_ind-2) - nx*l_per
+            X(3*ghost_ind-2) = X(3*parent_ind-2) - nx*l_per
+            X(3*ghost_ind-1) = X(3*parent_ind-1)
+            X(3*ghost_ind)   = X(3*parent_ind)
         ELSE IF per_dir = 3 THEN
-            X(3*ghost_ind-2) = X_0(3*parent_ind-2) + nx*l_per
+            X(3*ghost_ind-2) = X(3*parent_ind-2) + nx*l_per
+            X(3*ghost_ind-1) = X(3*parent_ind-1)
+            X(3*ghost_ind)   = X(3*parent_ind)
         ELSE IF per_dir = 4 THEN
-            X(3*ghost_ind-1) = X_0(3*parent_ind-1) + ny*l_per
+            X(3*ghost_ind-2) = X(3*parent_ind-2)
+            X(3*ghost_ind-1) = X(3*parent_ind-1) + ny*l_per
+            X(3*ghost_ind)   = X(3*parent_ind)
         END IF
     REPEAT
 END X_comp

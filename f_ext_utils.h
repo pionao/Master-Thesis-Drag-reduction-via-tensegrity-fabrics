@@ -1,9 +1,19 @@
-SUBROUTINE f_ext_sub(ARRAY(*) OF REAL f_ext^; INTEGER n_N_dof; INTEGER n_N; INTEGER n_G; REAL t)
+SUBROUTINE f_ext_sub(ARRAY(*) OF REAL f_ext^; INTEGER n_B; REAL t)
 
-  ! REAL w = 10
+  INTEGER nx = 11, ny = 11
+
+  REAL w = 4*PI
   REAL A = 1
 
-  LOOP FOR i = 1 TO FLOOR(3*(n_N-n_G)/2)
-    f_ext(3*i) = A 
+  ind_mc = nx*(ny+1)/2-(nx-1)/2
+
+  LOOP FOR i = 1 TO n_B
+    f_ext(3*i-2) = 0
+    f_ext(3*i-1) = 0
+    IF i > 4*(ind_mc-1) AND i <= 4*ind_mc THEN
+      f_ext(3*i) = A
+    ELSE
+      f_ext(3*i) = 0
+    END IF
   REPEAT
 END f_ext_sub

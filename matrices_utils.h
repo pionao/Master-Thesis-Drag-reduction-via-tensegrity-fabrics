@@ -2,20 +2,7 @@
 
 INCLUDE dof_utils.h
 
-! Definzione funzioni
-
-FUNCTION zeros_mat_int(INTEGER m; INTEGER n)->ARRAY(m, n) OF INTEGER
-
-    ARRAY(m, n) OF INTEGER mat
-
-    LOOP FOR i = 1 TO m
-        LOOP FOR j = 1 TO n
-            mat(i,j) = 0
-        REPEAT
-    REPEAT
-
-    RETURN mat
-END zeros_mat_int
+! Definizione funzioni e subroutine
 
 SUBROUTINE B_con_comp(ARRAY(*,*) OF INTEGER B_con^; INTEGER n_B; INTEGER n_C)
     
@@ -215,7 +202,7 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
 END T_comp 
 
 
-SUBROUTINE f_n_comp(ARRAY(*) OF REAL f_n^; INTEGER n_f; INTEGER n_N_dof; INTEGER n_N; INTEGER n_T; INTEGER n_G; INTEGER nx; INTEGER ny; REAL l_per; REAL l_b; REAL k; REAL sigma; ARRAY(*) OF REAL q_tilde; ARRAY(*) OF REAL X_0; ARRAY(*) OF REAL l_0; ARRAY(*,*) OF INTEGER T_con; ARRAY(*,*) OF INTEGER ghost_nodes)
+SUBROUTINE f_n_comp(ARRAY(*) OF REAL f_n^; INTEGER n_N_dof; INTEGER n_N; INTEGER n_T; INTEGER n_G; INTEGER nx; INTEGER ny; REAL l_per; REAL l_b; REAL k; REAL sigma; ARRAY(*) OF REAL q_tilde; ARRAY(*) OF REAL X_0; ARRAY(*) OF REAL l_0; ARRAY(*,*) OF INTEGER T_con; ARRAY(*,*) OF INTEGER ghost_nodes)
     
     ARRAY(3) OF REAL f_t, l_i, l_i_dot
 
@@ -284,7 +271,6 @@ SUBROUTINE f_n_comp(ARRAY(*) OF REAL f_n^; INTEGER n_f; INTEGER n_N_dof; INTEGER
     REPEAT
     
     LOOP FOR i = 1 TO n_G
-        !ghost_ind  = ghost_nodes(i, 1)
         parent_ind = ghost_nodes(i, 2)
 
         f_n(3*parent_ind-2) = f_n(3*parent_ind-2) + f_n_ghost(3*i-2)
@@ -305,7 +291,7 @@ END Cq_dot_compute
 
 SUBROUTINE f_mom_comp(ARRAY(*) OF REAL f_mom^; INTEGER n_q; INTEGER n_q_tilde; REAL l_b; ARRAY(*) OF REAL f_n; ARRAY(*) OF REAL q_tilde)
 
-    LOOP FOR i = 1 TO FLOOR(n_q_tilde/4)
+    LOOP FOR i = 1 TO FLOOR(n_q/2)
         f_mom(2*i-1) = l_b*[COS(q_tilde(2*i-1+n_q))*COS(q_tilde(2*i+n_q))*f_n(3*i-2) + COS(q_tilde(2*i-1+n_q))*SIN(q_tilde(2*i+n_q))*f_n(3*i-1) - SIN(q_tilde(2*i-1+n_q))*f_n(3*i)]
         f_mom(2*i)   = l_b*[-SIN(q_tilde(2*i-1+n_q))*SIN(q_tilde(2*i+n_q))*f_n(3*i-2) + SIN(q_tilde(2*i-1+n_q))*COS(q_tilde(2*i+n_q))*f_n(3*i-1)]
     REPEAT
