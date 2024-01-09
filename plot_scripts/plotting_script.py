@@ -8,7 +8,7 @@ from animation_utils import fabric_animation
 # Definizione parametri video
 
 fps            = 30
-video_duration = 1.0 # In seconds
+video_duration = 5.0 # In seconds
 
 
 # Import parametri fabric
@@ -61,6 +61,6 @@ plt.show()
 
 # Animazione
 
-# fabric_animation(q_tilde, t, video_duration, fps, X_0,
-#                       B_con, T_con, l_b, n_N, n_G, 
-#                       ghost_nodes, nx, nz, l_per)
+fabric_animation(q_tilde, t, video_duration, fps, X_0,
+                      B_con, T_con, l_b, n_N, n_G, 
+                      ghost_nodes, nx, nz, l_per)
