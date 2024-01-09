@@ -53,13 +53,14 @@ q_tilde = np.genfromtxt('./output/q_tilde.csv', delimiter=',')
 
 # Prova plot fabric
 
-# plot_tens(q_tilde[:,-1], X_0, B_con, T_con, l_b, n_N, n_G, ghost_nodes, nx, nz,
-#            l_per)
-# plt.show()
+fig = plt.figure()
+plot_tens(fig, q_tilde[:,0], X_0, B_con, T_con, l_b, n_N, n_G, ghost_nodes, nx, nz,
+           l_per)
+plt.show()
 
 
 # Animazione
 
-fabric_animation(q_tilde, t, video_duration, fps, X_0,
-                      B_con, T_con, l_b, n_N, n_G, 
-                      ghost_nodes, nx, nz, l_per)
+# fabric_animation(q_tilde, t, video_duration, fps, X_0,
+#                       B_con, T_con, l_b, n_N, n_G, 
+#                       ghost_nodes, nx, nz, l_per)

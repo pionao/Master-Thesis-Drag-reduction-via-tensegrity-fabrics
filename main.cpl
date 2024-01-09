@@ -16,7 +16,7 @@ INTEGER n_t = CEILING(t_end/dt + 1)
 
 REAL rho_b = 0.08 ! [kg/m] Massa per unità di lunghezza delle aste 
 REAL k     = 0.5  ! [N/m]  Costante elastica dei cavi 
-REAL sigma = 0.1  ! [-]    Damping 
+REAL sigma = 1  ! [-]    Damping 
 
 REAL h = 0.1 ! [m] Altezza cella 
 REAL r = 0.1 ! [m] Raggio cella 
@@ -31,8 +31,8 @@ INTEGER n_T_i = 12 ! Numero cavi singola cella
 
 ! Parametri fabric 
 
-INTEGER nx = 11 ! Numero celle in direzione x 
-INTEGER nz = 11 ! Numero celle in direzione z
+INTEGER nx = 10 ! Numero celle in direzione x 
+INTEGER nz = 5 ! Numero celle in direzione z
 
 n_C       = nx*nz             ! Numero totale celle
 n_B       = 4*nx*nz           ! Numero totale bielle
@@ -44,7 +44,7 @@ n_T_dof   = 3*n_T
 n_q_tilde = 2*2*n_B           ! Numero stati sistema
 
 alpha_1 = ATAN(SQRT(2)-1)                     ! Rotazione della singola cella
-l_per   = (2*r) / (COS(alpha_1)+sin(alpha_1)) ! Lunghezza vettore periodicità per una cella
+l_per   = (2*r) / (COS(alpha_1)+SIN(alpha_1)) ! Lunghezza vettore periodicità per una cella
 
 ! Definizione connettività bielle fabric 
 
@@ -77,8 +77,9 @@ ARRAY(n_N_dof) OF REAL X_0
 ARRAY(n_q_tilde) OF REAL q_0_tilde
 
 X_0_comp(X_0, h, r, alpha_1, l_per, nx, nz, n_N, n_G, n_N_dof, ghost_nodes)
-
+WRITE X_0
 q_0_tilde_comp(q_0_tilde, X_0, B_con, l_b, n_q_tilde, n_B)
+WRITE "OK3"
 
 ! Simulazione
 
@@ -106,5 +107,4 @@ mat_to_csv_real(q_tilde_arr, "output/q_tilde.csv")
 vec_to_csv_real(t_vec, "output/t.csv")
 
 ! Check 
-
 

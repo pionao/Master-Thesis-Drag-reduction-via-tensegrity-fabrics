@@ -3,7 +3,7 @@ SUBROUTINE f_ext_sub(ARRAY(*) OF REAL f_ext^; INTEGER n_B; REAL t)
   INTEGER nx = 11, ny = 11
 
   REAL w = 4*PI
-  REAL A = 1
+  REAL A = 0
 
   ind_mc = nx*(ny+1)/2-(nx-1)/2
 

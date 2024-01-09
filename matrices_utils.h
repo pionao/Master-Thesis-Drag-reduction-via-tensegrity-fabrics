@@ -23,39 +23,38 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
 
     ARRAY(n_C, 10) OF INTEGER Ten_cell_up
 
-    LOOP FOR j = 1 TO nz AND i = 1 TO nx
+    LOOP FOR j = 1 TO nx AND i = 1 TO nz
 
-        ind = FLOOR(i+nx*(j-1))
+        ind = FLOOR(i+nz*(j-1))
+        
+        Ten_cell_up(ind, 1) = FLOOR(4*(i+(j-1)*nz)-3)
+        Ten_cell_up(ind, 2) = FLOOR(4*(i+(j-1)*nz)-2)
+        Ten_cell_up(ind, 3) = FLOOR(4*(i+(j-1)*nz)-1)
+        Ten_cell_up(ind, 4) = FLOOR(4*(i+(j-1)*nz))
 
-        Ten_cell_up(ind, 1) = FLOOR(4*(i+(j-1)*nx)-3)
-        Ten_cell_up(ind, 2) = FLOOR(4*(i+(j-1)*nx)-2)
-        Ten_cell_up(ind, 3) = FLOOR(4*(i+(j-1)*nx)-1)
-        Ten_cell_up(ind, 4) = FLOOR(4*(i+(j-1)*nx))
-
-        IF NOT(i MOD nx=0) THEN
-            Ten_cell_up(ind, 5) = FLOOR(i+(j-1)*nx+1)
+        IF NOT(i MOD nz=0) THEN
+            Ten_cell_up(ind, 5) = FLOOR(i+(j-1)*nz+1)
         END IF
 
-        IF NOT(j MOD nz=0) THEN
-            Ten_cell_up(ind, 6) = FLOOR(i+j*nx)
+        IF NOT(j MOD nx=0) THEN
+            Ten_cell_up(ind, 6) = FLOOR(i+j*nz)
         END IF
 
         IF j = 1 THEN
-            Ten_cell_up(ind, 7) = FLOOR(i+nx*(nz-1))
+            Ten_cell_up(ind, 7) = FLOOR(i+nz*(nx-1))
         END IF
 
         IF i = 1 THEN
-            Ten_cell_up(ind, 8) = FLOOR(nx+nx*(j-1))
+            Ten_cell_up(ind, 8) = FLOOR(nz+nz*(j-1))
         END IF
 
-        IF i = nx THEN
-            Ten_cell_up(ind, 9) = FLOOR(1+nx*(j-1))
+        IF i = nz THEN
+            Ten_cell_up(ind, 9) = FLOOR(1+nz*(j-1))
         END IF
 
-        IF j = nz THEN 
+        IF j = nx THEN 
             Ten_cell_up(ind, 10) = i
         END IF
-
     REPEAT
 
     INTEGER count_1 = 0
@@ -64,6 +63,7 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
 
         r_con = Ten_cell_up(i, 5)
         u_con = Ten_cell_up(i, 6)
+
         IF NOT(r_con = 0) THEN
             count_1 = count_1 + 1
 
@@ -97,7 +97,7 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
     INTEGER count_2 = 0
     INTEGER count_g = 0
 
-    LOOP FOR i = 1 TO nx
+    LOOP FOR i = 1 TO nz
         count_g             = count_g + 1
         count_2             = count_2 + 1
         ghost_down_cell_ind = Ten_cell_up(i, 7)
@@ -116,11 +116,11 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
         ghost_nodes(count_g, 3) = 1
     REPEAT
 
-    LOOP FOR i = 1 TO nz
+    LOOP FOR i = 1 TO nx
         count_g = count_g + 1
         count_2 = count_2 + 1
 
-        j = 1 + (i-1)*nx
+        j = 1 + (i-1)*nz
 
         ghost_left_cell_ind = Ten_cell_up(j, 8)
         ghost_node          = 8*nx*nz + count_g
@@ -140,11 +140,11 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
 
     INTEGER count_3 = 0
 
-    LOOP FOR i = 1 TO nz
+    LOOP FOR i = 1 TO nx
         count_g = count_g + 1
         count_3 = count_3 + 1
 
-        j = i*nx
+        j = i*nz
 
         ghost_right_cell_ind = Ten_cell_up(j, 9)
         ghost_node           = 8*nx*nz + count_g
@@ -159,11 +159,11 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
         ghost_nodes(count_g, 3) = 3
     REPEAT
 
-    LOOP FOR i = 1 TO nx
+    LOOP FOR i = 1 TO nz
         count_g = count_g + 1
         count_3 = count_3 + 1
 
-        j = i + (nz-1)*nx
+        j = i + (nx-1)*nz
 
         ghost_up_cell_ind = Ten_cell_up(j, 10)
         ghost_node        = 8*nx*nz + count_g
@@ -179,8 +179,6 @@ SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_node
     REPEAT
 
     INTEGER count_4 = 0
-
-    ARRAY(4, 2) OF INTEGER T_con_sub
 
     LOOP FOR i = 1 TO nx*nz
         count_4 = count_4 + 1
