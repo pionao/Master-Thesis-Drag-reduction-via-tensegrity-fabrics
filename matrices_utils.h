@@ -1,6 +1,7 @@
 ! Inclusioni
 
 INCLUDE dof_utils.h
+!USE rtchecks
 
 ! Definizione funzioni e subroutine
 
@@ -19,7 +20,7 @@ SUBROUTINE B_con_comp(ARRAY(*,*) OF INTEGER B_con^; INTEGER n_B; INTEGER n_C)
 END B_con_comp 
 
 
-SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,2) OF INTEGER ghost_nodes^; ARRAY(*) OF REAL l_0^; INTEGER nx; INTEGER nz; INTEGER n_C; INTEGER n_T; INTEGER n_G; REAL l_u_s_0; REAL l_u_l_0; REAL l_i_0)
+SUBROUTINE T_comp(ARRAY(*,2) OF INTEGER T_con^; ARRAY(*,3) OF INTEGER ghost_nodes^; ARRAY(*) OF REAL l_0^; INTEGER nx; INTEGER nz; INTEGER n_C; INTEGER n_T; INTEGER n_G; REAL l_u_s_0; REAL l_u_l_0; REAL l_i_0)
 
     ARRAY(n_C, 10) OF INTEGER Ten_cell_up
 
@@ -213,8 +214,8 @@ SUBROUTINE f_n_comp(ARRAY(*) OF REAL f_n^; INTEGER n_N_dof; INTEGER n_N; INTEGER
     
     INTEGER ind_A, ind_B, ind_G
 
-    ARRAY(n_N_dof) OF REAL X
-    ARRAY(n_N_dof) OF REAL X_dot
+    ARRAY(n_N_dof) OF REAL X     = 0
+    ARRAY(n_N_dof) OF REAL X_dot = 0
     
     X_comp(X, n_N_dof, n_N, n_G, nx, ny, l_per, l_b, q_tilde, X_0, ghost_nodes)
     X_dot_comp(X_dot, n_N_dof, n_N, n_G, l_b, q_tilde, ghost_nodes)

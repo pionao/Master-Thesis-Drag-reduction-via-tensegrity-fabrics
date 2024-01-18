@@ -4,6 +4,7 @@ INCLUDE matrices_utils.h
 INCLUDE initial_state_utils.h
 INCLUDE sim_utils.h
 INCLUDE output_utils.h
+!USE rtchecks
 
 ! Parametri Simulazione
 
@@ -31,8 +32,8 @@ INTEGER n_T_i = 12 ! Numero cavi singola cella
 
 ! Parametri fabric 
 
-INTEGER nx = 20 ! Numero celle in direzione x 
-INTEGER nz = 4 ! Numero celle in direzione z
+INTEGER nx = 2 ! Numero celle in direzione x 
+INTEGER nz = 2 ! Numero celle in direzione z
 
 n_C       = nx*nz             ! Numero totale celle
 n_B       = 4*nx*nz           ! Numero totale bielle
@@ -73,8 +74,8 @@ T_comp(T_con, ghost_nodes, l_0, nx, nz, n_C, n_T, n_G, l_u_s_0, l_u_l_0, l_i_0)
 
 ! Costruzione vettore DOF iniziale
 
-ARRAY(n_N_dof) OF REAL X_0
-ARRAY(n_q_tilde) OF REAL q_0_tilde
+ARRAY(n_N_dof) OF REAL X_0 = 0
+ARRAY(n_q_tilde) OF REAL q_0_tilde = 0
 
 X_0_comp(X_0, h, r, alpha_1, l_per, nx, nz, n_N, n_G, n_N_dof, ghost_nodes)
 q_0_tilde_comp(q_0_tilde, X_0, B_con, l_b, n_q_tilde, n_B)

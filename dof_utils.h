@@ -1,3 +1,5 @@
+!USE rtchecks
+
 SUBROUTINE X_dot_comp(ARRAY(*) OF REAL X_dot^; INTEGER n_N_dof; INTEGER n_N; INTEGER n_G; REAL l_b; ARRAY(*) OF REAL q_tilde; ARRAY(*,*) OF INTEGER ghost_nodes)
 
     LOOP FOR i = 1 TO FLOOR((n_N-n_G)/2)

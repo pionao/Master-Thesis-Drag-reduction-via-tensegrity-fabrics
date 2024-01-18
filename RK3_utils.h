@@ -1,10 +1,11 @@
 INCLUDE dof_utils.h
 INCLUDE f_ext_utils.h
 INCLUDE f_ext_wave.h
+!USE rtchecks
 
 SUBROUTINE K_i_compute(ARRAY(*) OF REAL K_i^; INTEGER n_q_tilde; INTEGER n_T_dof; REAL t; INTEGER n_N_dof; INTEGER n_N; INTEGER n_G; INTEGER n_T; INTEGER n_B; INTEGER nx; INTEGER nz; REAL l_per; REAL l_b; REAL sigma; REAL k; REAL I_0; ARRAY(*) OF REAL q_tilde; ARRAY(*) OF REAL X_0; ARRAY(*) OF REAL l_0; ARRAY(*,*) OF INTEGER T_con; ARRAY(*,*) OF INTEGER ghost_nodes)
     ARRAY(2*n_B) OF REAL Cq_dot
-    ARRAY(3*n_B) OF REAL f_ext
+    ARRAY(3*n_B) OF REAL f_ext = 0
     ARRAY(2*n_B) OF REAL f_mom
 
     ARRAY(3*n_B) OF REAL f_n
