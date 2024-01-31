@@ -9,7 +9,7 @@ INCLUDE output_utils.h
 ! Parametri Simulazione
 
 REAL dt    = 0.001  ! [s] Passo temporale
-REAL t_end = 5  ! [s] Tempo finale
+REAL t_end = 1  ! [s] Tempo finale
 
 INTEGER n_t = CEILING(t_end/dt + 1)
 
@@ -32,8 +32,8 @@ INTEGER n_T_i = 12 ! Numero cavi singola cella
 
 ! Parametri fabric 
 
-INTEGER nx = 2 ! Numero celle in direzione x 
-INTEGER nz = 2 ! Numero celle in direzione z
+INTEGER nx = 50 ! Numero celle in direzione x 
+INTEGER nz = 5 ! Numero celle in direzione z
 
 n_C       = nx*nz             ! Numero totale celle
 n_B       = 4*nx*nz           ! Numero totale bielle
@@ -43,6 +43,7 @@ n_N       = n_C * n_N_i + n_G ! Numero nodi
 n_N_dof   = 3*n_N             ! Numero di coordinate di tutti i nodi
 n_T_dof   = 3*n_T
 n_q_tilde = 2*2*n_B           ! Numero stati sistema
+n_P       = 6*n_C + 2*(nx-1)*(nz-1)            ! Numero di patch triangolazione superficie
 
 alpha_1 = ATAN(SQRT(2)-1)                     ! Rotazione della singola cella
 l_per   = (2*r) / (COS(alpha_1)+SIN(alpha_1)) ! Lunghezza vettore periodicità per una cella
@@ -72,6 +73,12 @@ ARRAY(n_T) OF REAL l_0
 
 T_comp(T_con, ghost_nodes, l_0, nx, nz, n_C, n_T, n_G, l_u_s_0, l_u_l_0, l_i_0)
 
+! Costruzione matrice superficie interfaccia
+
+ARRAY(n_P, 3) OF INTEGER P_mat
+
+P_comp(P_mat, ghost_nodes, nx, nz, n_C, n_T, n_G)
+
 ! Costruzione vettore DOF iniziale
 
 ARRAY(n_N_dof) OF REAL X_0 = 0
@@ -99,6 +106,7 @@ vec_to_csv_real(par_real_arr, "output/par_real_arr.csv")
 
 mat_to_csv_int(B_con, "output/B_con.csv")
 mat_to_csv_int(T_con, "output/T_con.csv")
+mat_to_csv_int(P_mat, "output/P_mat.csv")
 mat_to_csv_int(ghost_nodes, "output/ghost_nodes.csv")
 vec_to_csv_real(X_0, "output/X_0.csv")
 

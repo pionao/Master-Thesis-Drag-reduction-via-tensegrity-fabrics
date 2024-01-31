@@ -8,7 +8,7 @@ from animation_utils import fabric_animation
 # Definizione parametri video
 
 fps            = 30
-video_duration = 5.0 # In seconds
+video_duration = 1.0 # In seconds
 
 
 # Import parametri fabric
@@ -36,8 +36,7 @@ X_0 = np.genfromtxt('./output/X_0.csv', delimiter=',')
 
 # Import matrici conettività
 
-B_con = np.genfromtxt('./output/B_con.csv', delimiter=',', dtype='int')
-T_con = np.genfromtxt('./output/T_con.csv', delimiter=',', dtype='int')
+P_mat = np.genfromtxt('./output/P_mat.csv', delimiter=',', dtype='int')
 
 
 # Import informazioni nodi ghost
@@ -54,7 +53,7 @@ q_tilde = np.genfromtxt('./output/q_tilde.csv', delimiter=',')
 # Prova plot fabric
 
 fig = plt.figure()
-plot_tens(fig, q_tilde[:,0], X_0, B_con, T_con, l_b, n_N, n_G, ghost_nodes, nx, nz,
+plot_tens(fig, q_tilde[:,0], X_0, P_mat, l_b, n_N, n_G, ghost_nodes, nx, nz,
            l_per)
 plt.show()
 
@@ -62,5 +61,5 @@ plt.show()
 # Animazione
 
 fabric_animation(q_tilde, t, video_duration, fps, X_0,
-                      B_con, T_con, l_b, n_N, n_G, 
+                      P_mat, l_b, n_N, n_G, 
                       ghost_nodes, nx, nz, l_per)

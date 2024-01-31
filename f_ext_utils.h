@@ -18,9 +18,9 @@ SUBROUTINE f_ext_sub(ARRAY(*) OF REAL f_ext^; INTEGER n_B; REAL t)
   REPEAT!}
 
   LOOP FOR i = 1 TO n_B
-    f_ext(3*i-2) = 2*RAND()-1
-    f_ext(3*i-1) = 2*RAND()-1
-    f_ext(3*i) = 2*RAND()-1
+    f_ext(3*i-2) = A
+    f_ext(3*i-1) = 0
+    f_ext(3*i) = 0
   REPEAT
 
 END f_ext_sub

@@ -14,7 +14,7 @@ SUBROUTINE f_ext_sub_wave(ARRAY(*) OF REAL f_ext^; ARRAY(*) OF REAL q_tilde; INT
         x = X(3*i-2)
         
         f_ext(3*i-2) = 0
-        f_ext(3*i-1) = A*COS(k_x*(x-c*t))
-        f_ext(3*i)   = 0
+        f_ext(3*i-1) = 0
+        f_ext(3*i)   = A*COS(k_x*(x-c*t))
     REPEAT
 END f_ext_sub_wave

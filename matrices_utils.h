@@ -297,4 +297,335 @@ SUBROUTINE f_mom_comp(ARRAY(*) OF REAL f_mom^; INTEGER n_q; INTEGER n_q_tilde; R
 END f_mom_comp
 
 
+SUBROUTINE P_comp(ARRAY(*,*) OF INTEGER P_mat^; ARRAY(*,*) OF INTEGER ghost_nodes; INTEGER nx; INTEGER nz; INTEGER n_C; INTEGER n_T; INTEGER n_G)
 
+    ARRAY(n_C, 10) OF INTEGER Ten_cell_up
+
+    LOOP FOR j = 1 TO nx AND i = 1 TO nz
+
+        ind = FLOOR(i+nz*(j-1))
+        
+        Ten_cell_up(ind, 1) = FLOOR(4*(i+(j-1)*nz)-3)
+        Ten_cell_up(ind, 2) = FLOOR(4*(i+(j-1)*nz)-2)
+        Ten_cell_up(ind, 3) = FLOOR(4*(i+(j-1)*nz)-1)
+        Ten_cell_up(ind, 4) = FLOOR(4*(i+(j-1)*nz))
+
+        IF NOT(i MOD nz=0) THEN
+            Ten_cell_up(ind, 5) = FLOOR(i+(j-1)*nz+1)
+        END IF
+
+        IF NOT(j MOD nx=0) THEN
+            Ten_cell_up(ind, 6) = FLOOR(i+j*nz)
+        END IF
+
+        IF j = 1 THEN
+            Ten_cell_up(ind, 7) = FLOOR(i+nz*(nx-1))
+        END IF
+
+        IF i = 1 THEN
+            Ten_cell_up(ind, 8) = FLOOR(nz+nz*(j-1))
+        END IF
+
+        IF i = nz THEN
+            Ten_cell_up(ind, 9) = FLOOR(1+nz*(j-1))
+        END IF
+
+        IF j = nx THEN 
+            Ten_cell_up(ind, 10) = i
+        END IF
+    REPEAT
+
+    INTEGER ghost_ind = 0
+    INTEGER floor_ind = 0
+
+    LOOP FOR j = 1 TO nx
+        LOOP FOR i = 1 TO nz
+            ind = i + (j-1)*nz
+
+            IF i = 1 AND j = 1 THEN
+                P_mat(1+floor_ind, 1) = 1
+                P_mat(1+floor_ind, 2) = ghost_nodes(1, 1)
+                P_mat(1+floor_ind, 3) = ghost_nodes(nz+1, 1)
+
+                P_mat(2+floor_ind, 1) = ghost_nodes(1, 1)
+                P_mat(2+floor_ind, 2) = 4*(nz+1) - 2
+                P_mat(2+floor_ind, 3) = ghost_nodes(nz+1, 1)
+
+                P_mat(3+floor_ind, 1) = ghost_nodes(1, 1)
+                P_mat(3+floor_ind, 2) = 4*2 - 3
+                P_mat(3+floor_ind, 3) = 4*(nz+1) - 2
+
+                P_mat(4+floor_ind, 1) = ghost_nodes(1, 1)
+                P_mat(4+floor_ind, 2) = 2
+                P_mat(4+floor_ind, 3) = 4*2 - 3
+
+                P_mat(5+floor_ind, 1) = ghost_nodes(nz+1, 1)
+                P_mat(5+floor_ind, 2) = 4*(nz+1) - 2
+                P_mat(5+floor_ind, 3) = 4
+
+                P_mat(6+floor_ind, 1) = 4*(nz+1) - 2
+                P_mat(6+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(6+floor_ind, 3) = 3
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i > 1 AND i < nz AND j = 1 THEN
+                P_mat(1+floor_ind, 1) = 4*ind - 3
+                P_mat(1+floor_ind, 2) = ghost_nodes(i, 1)
+                P_mat(1+floor_ind, 3) = 4*(ind-1) - 1
+
+                P_mat(2+floor_ind, 1) = ghost_nodes(i, 1)
+                P_mat(2+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(2+floor_ind, 3) = 4*(ind-1) - 1
+
+                P_mat(3+floor_ind, 1) = ghost_nodes(i, 1)
+                P_mat(3+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(3+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(4+floor_ind, 1) = ghost_nodes(i, 1)
+                P_mat(4+floor_ind, 2) = 4*ind - 2
+                P_mat(4+floor_ind, 3) = 4*(ind+1) - 3
+
+                P_mat(5+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(5+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(5+floor_ind, 3) = 4*ind
+
+                P_mat(6+floor_ind, 1) = 4*(ind+nz) - 2
+                P_mat(6+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(6+floor_ind, 3) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i = nz AND j = 1 THEN
+                P_mat(1+floor_ind, 1) = 4*ind - 3
+                P_mat(1+floor_ind, 2) = ghost_nodes(i, 1)
+                P_mat(1+floor_ind, 3) = 4*(ind-1) - 1
+
+                P_mat(2+floor_ind, 1) = ghost_nodes(i, 1)
+                P_mat(2+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(2+floor_ind, 3) = 4*(ind-1) - 1
+
+                P_mat(3+floor_ind, 1) = ghost_nodes(i, 1)
+                P_mat(3+floor_ind, 2) = ghost_nodes(nz+nx+1, 1)
+                P_mat(3+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(4+floor_ind, 1) = ghost_nodes(i, 1)
+                P_mat(4+floor_ind, 2) = 4*ind - 2
+                P_mat(4+floor_ind, 3) = ghost_nodes(nz+nx+1, 1)
+
+                P_mat(5+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(5+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(5+floor_ind, 3) = 4*ind
+
+                P_mat(6+floor_ind, 1) = 4*(ind+nz) - 2
+                P_mat(6+floor_ind, 2) = ghost_nodes(nz+nx+1, 1)
+                P_mat(6+floor_ind, 3) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i = 1 AND j > 1 AND j < nx THEN
+                P_mat(1+floor_ind, 1) = 4*ind - 3
+                P_mat(1+floor_ind, 2) = 4*(ind-nz)
+                P_mat(1+floor_ind, 3) = ghost_nodes(nz+j, 1)
+
+                P_mat(2+floor_ind, 1) = 4*(ind-nz)
+                P_mat(2+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(2+floor_ind, 3) = ghost_nodes(nz+j, 1)
+
+                P_mat(3+floor_ind, 1) = 4*(ind-nz)
+                P_mat(3+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(3+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(4+floor_ind, 1) = 4*(ind-nz)
+                P_mat(4+floor_ind, 2) = 4*ind - 2
+                P_mat(4+floor_ind, 3) = 4*(ind+1) - 3
+
+                P_mat(5+floor_ind, 1) = ghost_nodes(nz+j, 1)
+                P_mat(5+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(5+floor_ind, 3) = 4*ind
+
+                P_mat(6+floor_ind, 1) = 4*(ind+nz) - 2
+                P_mat(6+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(6+floor_ind, 3) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF j > 1 AND j < nx AND i > 1 AND i < nz THEN
+                P_mat(1+floor_ind, 1) = 4*(ind-1) - 2
+                P_mat(1+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(1+floor_ind, 3) = 4*ind - 3
+
+                P_mat(2+floor_ind, 1) = 4*ind - 3
+                P_mat(2+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(2+floor_ind, 3) = 4*(ind-nz)
+
+                P_mat(3+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(3+floor_ind, 2) = 4*ind - 3
+                P_mat(3+floor_ind, 3) = 4*(ind-nz)
+
+                P_mat(4+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(4+floor_ind, 2) = 4*(ind-nz)
+                P_mat(4+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(5+floor_ind, 1) = 4*(ind-nz)
+                P_mat(5+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(5+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(6+floor_ind, 1) = 4*(ind-nz)
+                P_mat(6+floor_ind, 2) = 4*ind - 2
+                P_mat(6+floor_ind, 3) = 4*(ind+1) - 3
+
+                P_mat(7+floor_ind, 1) = 4*ind
+                P_mat(7+floor_ind, 2) = 4*(ind-1) - 1
+                P_mat(7+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(8+floor_ind, 1) = 4*(ind+nz) - 2
+                P_mat(8+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(8+floor_ind, 3) = 4*ind - 1
+
+                floor_ind = 8 + floor_ind
+            END IF
+
+            IF i = nz AND j > 1 AND j < nx THEN
+                P_mat(1+floor_ind, 1) = 4*(ind-1) - 2
+                P_mat(1+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(1+floor_ind, 3) = 4*ind - 3
+
+                P_mat(2+floor_ind, 1) = 4*ind - 3
+                P_mat(2+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(2+floor_ind, 3) = 4*(ind-nz)
+
+                P_mat(3+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(3+floor_ind, 2) = 4*ind - 3
+                P_mat(3+floor_ind, 3) = 4*(ind-nz)
+
+                P_mat(4+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(4+floor_ind, 2) = 4*(ind-nz)
+                P_mat(4+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(5+floor_ind, 1) = 4*(ind-nz)
+                P_mat(5+floor_ind, 2) = ghost_nodes(nz+nx+j, 1)
+                P_mat(5+floor_ind, 3) = 4*(ind+nz) - 2
+
+                P_mat(6+floor_ind, 1) = 4*(ind-nz)
+                P_mat(6+floor_ind, 2) = 4*ind - 2
+                P_mat(6+floor_ind, 3) = ghost_nodes(nz+nx+j, 1)
+
+                P_mat(7+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(7+floor_ind, 2) = 4*(ind+nz) - 2
+                P_mat(7+floor_ind, 3) = 4*ind
+
+                P_mat(8+floor_ind, 1) = 4*(ind+nz) - 2
+                P_mat(8+floor_ind, 2) = ghost_nodes(nz+nx+j, 1)
+                P_mat(8+floor_ind, 3) = 4*ind - 1
+
+                floor_ind = 8 + floor_ind
+            END IF
+
+            IF i = 1 AND j = nx THEN
+                P_mat(1+floor_ind, 1) = 4*ind - 3
+                P_mat(1+floor_ind, 2) = 4*(ind-nz)
+                P_mat(1+floor_ind, 3) = ghost_nodes(nz+nx, 1)
+
+                P_mat(2+floor_ind, 1) = 4*(ind-nz)
+                P_mat(2+floor_ind, 2) = ghost_nodes(nz+2*nx+1, 1)
+                P_mat(2+floor_ind, 3) = ghost_nodes(nz+nx, 1)
+
+                P_mat(3+floor_ind, 1) = 4*(ind-nz)
+                P_mat(3+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(3+floor_ind, 3) = ghost_nodes(nz+2*nx+1, 1)
+
+                P_mat(4+floor_ind, 1) = 4*(ind-nz)
+                P_mat(4+floor_ind, 2) = 4*ind - 2
+                P_mat(4+floor_ind, 3) = 4*(ind+1) - 3
+
+                P_mat(5+floor_ind, 1) = ghost_nodes(nz+nx, 1)
+                P_mat(5+floor_ind, 2) = ghost_nodes(nz+2*nx+1, 1)
+                P_mat(5+floor_ind, 3) = 4*ind
+
+                P_mat(6+floor_ind, 1) = ghost_nodes(nz+2*nx+1, 1)
+                P_mat(6+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(6+floor_ind, 3) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i > 1 AND i < nz AND j = nx THEN
+                P_mat(1+floor_ind, 1) = 4*(ind-1) - 2
+                P_mat(1+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(1+floor_ind, 3) = 4*ind - 3
+
+                P_mat(2+floor_ind, 1) = 4*ind - 3
+                P_mat(2+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(2+floor_ind, 3) = 4*(ind-nz)
+
+                P_mat(3+floor_ind, 1) = 4*(ind-nz)
+                P_mat(3+floor_ind, 2) = 4*(ind-1) - 1
+                P_mat(3+floor_ind, 3) = 4*ind - 3
+
+                P_mat(4+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(4+floor_ind, 2) = 4*(ind-nz)
+                P_mat(4+floor_ind, 3) = ghost_nodes(nz+2*nx+i, 1)
+
+                P_mat(5+floor_ind, 1) = 4*(ind-nz)
+                P_mat(5+floor_ind, 2) = 4*(ind+1) - 3
+                P_mat(5+floor_ind, 3) = ghost_nodes(nz+2*nx+i, 1)
+
+                P_mat(6+floor_ind, 1) = 4*(ind-nz)
+                P_mat(6+floor_ind, 2) = 4*ind - 2
+                P_mat(6+floor_ind, 3) = 4*(ind+1) - 3
+
+                P_mat(7+floor_ind, 1) = 4*ind
+                P_mat(7+floor_ind, 2) = 4*(ind-1) - 1
+                P_mat(7+floor_ind, 3) = ghost_nodes(nz+2*nx+i, 1)
+
+                P_mat(8+floor_ind, 1) = 4*(ind+1) - 3
+                P_mat(8+floor_ind, 2) = 4*ind - 1
+                P_mat(8+floor_ind, 3) = ghost_nodes(nz+2*nx+i, 1)
+
+                floor_ind = 8 + floor_ind
+            END IF
+
+            IF i = nz AND j = nx THEN
+                P_mat(1+floor_ind, 1) = 4*(ind-1) - 2
+                P_mat(1+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(1+floor_ind, 3) = 4*ind - 3
+
+                P_mat(2+floor_ind, 1) = 4*ind - 3
+                P_mat(2+floor_ind, 2) = 4*(ind-1-nz) - 1
+                P_mat(2+floor_ind, 3) = 4*(ind-nz)
+
+                P_mat(3+floor_ind, 1) = 4*(ind-nz)
+                P_mat(3+floor_ind, 2) = 4*(ind-1) - 1
+                P_mat(3+floor_ind, 3) = 4*ind - 3
+
+                P_mat(4+floor_ind, 1) = 4*(ind-1) - 1
+                P_mat(4+floor_ind, 2) = 4*(ind-nz)
+                P_mat(4+floor_ind, 3) = ghost_nodes(2*nz+2*nx, 1)
+
+                P_mat(5+floor_ind, 1) = 4*(ind-nz)
+                P_mat(5+floor_ind, 2) = ghost_nodes(nz+2*nx, 1)
+                P_mat(5+floor_ind, 3) = ghost_nodes(2*nz+2*nx, 1)
+
+                P_mat(6+floor_ind, 1) = 4*(ind-nz)
+                P_mat(6+floor_ind, 2) = 4*ind - 2
+                P_mat(6+floor_ind, 3) = ghost_nodes(nz+2*nx, 1)
+
+                P_mat(7+floor_ind, 1) = 4*ind
+                P_mat(7+floor_ind, 2) = 4*(ind-1) - 1
+                P_mat(7+floor_ind, 3) = ghost_nodes(2*nz+2*nx, 1)
+
+                P_mat(8+floor_ind, 1) = ghost_nodes(nz+2*nx, 1)
+                P_mat(8+floor_ind, 2) = 4*ind - 1
+                P_mat(8+floor_ind, 3) = ghost_nodes(2*nz+2*nx, 1)
+
+                floor_ind = 8 + floor_ind
+            END IF
+        REPEAT
+    REPEAT
+
+END P_comp

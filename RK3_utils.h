@@ -15,8 +15,8 @@ SUBROUTINE K_i_compute(ARRAY(*) OF REAL K_i^; INTEGER n_q_tilde; INTEGER n_T_dof
     
     f_n_comp(f_n, n_N_dof, n_N, n_T, n_G, nx, nz, l_per, l_b, k, sigma, q_tilde, X_0, l_0, T_con, ghost_nodes)
 
-    !f_ext_sub(f_ext, n_B, t)
-    f_ext_sub_wave(f_ext, q_tilde, n_B, t, n_N_dof, n_G, nx, nz, n_N, l_per, l_b, X_0, ghost_nodes)
+    f_ext_sub(f_ext, n_B, t)
+    !f_ext_sub_wave(f_ext, q_tilde, n_B, t, n_N_dof, n_G, nx, nz, n_N, l_per, l_b, X_0, ghost_nodes)
 
     LOOP FOR i = 1 TO 3*n_B
         f_n(i) = f_n(i) + f_ext(i)

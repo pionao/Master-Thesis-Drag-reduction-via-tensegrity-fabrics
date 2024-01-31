@@ -4,15 +4,15 @@ import matplotlib.animation as animation
 from plot_utils import plot_tens
 from functools import partial
 
-def updatefig(i, fig, q_tilde, X_0, B_con, T_con, l_b, 
+def updatefig(i, fig, q_tilde, X_0, P_mat, l_b, 
               n_N, n_G, ghost_nodes, nx, ny, l_per, instant_jump):
     fig.clear()
-    plot_tens(fig, q_tilde[:,i*instant_jump], X_0, B_con, T_con, l_b, n_N,
+    plot_tens(fig, q_tilde[:,i*instant_jump], X_0, P_mat, l_b, n_N,
                n_G, ghost_nodes, nx, ny, l_per)
 
 
 def fabric_animation(q_tilde, t, video_duration, fps, X_0,
-                      B_con, T_con, l_b, n_N, n_G, 
+                      P_mat, l_b, n_N, n_G, 
                       ghost_nodes, nx, ny, l_per):
     dt = t[1] - t[0]
     T  = t[-1] - t[0]
@@ -24,8 +24,7 @@ def fabric_animation(q_tilde, t, video_duration, fps, X_0,
     fig = plt.figure(figsize=(19.2, 10.8))
     anim = animation.FuncAnimation(fig, partial(updatefig, fig=fig,
                                      q_tilde=q_tilde, 
-                                     X_0=X_0, B_con=B_con, 
-                                     T_con=T_con, l_b=l_b,
+                                     X_0=X_0, P_mat=P_mat, l_b=l_b,
                                      n_N=n_N, n_G=n_G, ghost_nodes=ghost_nodes,
                                      nx=nx, ny=ny, l_per=l_per, 
                                      instant_jump=instant_jump),
