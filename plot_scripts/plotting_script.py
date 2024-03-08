@@ -36,7 +36,8 @@ X_0 = np.genfromtxt('./output/X_0.csv', delimiter=',')
 
 # Import matrici conettività
 
-P_mat = np.genfromtxt('./output/P_mat.csv', delimiter=',', dtype='int')
+P_mat     = np.genfromtxt('./output/P_mat.csv', delimiter=',', dtype='int')
+P_mat_per = np.genfromtxt('./output/P_mat_per.csv', delimiter=',', dtype='int')
 
 
 # Import informazioni nodi ghost
@@ -53,7 +54,7 @@ q_tilde = np.genfromtxt('./output/q_tilde.csv', delimiter=',')
 # Prova plot fabric
 
 fig = plt.figure()
-plot_tens(fig, q_tilde[:,0], X_0, P_mat, l_b, n_N, n_G, ghost_nodes, nx, nz,
+plot_tens(fig, q_tilde[:,0], X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes, nx, nz,
            l_per)
 plt.show()
 
@@ -61,5 +62,5 @@ plt.show()
 # Animazione
 
 fabric_animation(q_tilde, t, video_duration, fps, X_0,
-                      P_mat, l_b, n_N, n_G, 
+                      P_mat, P_mat_per, l_b, n_N, n_G, 
                       ghost_nodes, nx, nz, l_per)

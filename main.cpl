@@ -4,6 +4,7 @@ INCLUDE matrices_utils.h
 INCLUDE initial_state_utils.h
 INCLUDE sim_utils.h
 INCLUDE output_utils.h
+INCLUDE fake_grid.h
 !USE rtchecks
 
 ! Parametri Simulazione
@@ -32,7 +33,7 @@ INTEGER n_T_i = 12 ! Numero cavi singola cella
 
 ! Parametri fabric 
 
-INTEGER nx = 50 ! Numero celle in direzione x 
+INTEGER nx = 5 ! Numero celle in direzione x 
 INTEGER nz = 5 ! Numero celle in direzione z
 
 n_C       = nx*nz             ! Numero totale celle
@@ -43,7 +44,7 @@ n_N       = n_C * n_N_i + n_G ! Numero nodi
 n_N_dof   = 3*n_N             ! Numero di coordinate di tutti i nodi
 n_T_dof   = 3*n_T
 n_q_tilde = 2*2*n_B           ! Numero stati sistema
-n_P       = 6*n_C + 2*(nx-1)*(nz-1)            ! Numero di patch triangolazione superficie
+n_P       = 6*n_C + 2*(nx-1)*(nz-1) + 6*2*(nz+nx+2) + 2*2*(nz+nx) ! Numero di patch triangolazione superficie
 
 alpha_1 = ATAN(SQRT(2)-1)                     ! Rotazione della singola cella
 l_per   = (2*r) / (COS(alpha_1)+SIN(alpha_1)) ! Lunghezza vettore periodicità per una cella
@@ -75,7 +76,7 @@ T_comp(T_con, ghost_nodes, l_0, nx, nz, n_C, n_T, n_G, l_u_s_0, l_u_l_0, l_i_0)
 
 ! Costruzione matrice superficie interfaccia
 
-ARRAY(n_P, 3) OF INTEGER P_mat
+ARRAY(n_P, 3, 2) OF INTEGER P_mat
 
 P_comp(P_mat, ghost_nodes, nx, nz, n_C, n_T, n_G)
 
@@ -86,6 +87,30 @@ ARRAY(n_q_tilde) OF REAL q_0_tilde = 0
 
 X_0_comp(X_0, h, r, alpha_1, l_per, nx, nz, n_N, n_G, n_N_dof, ghost_nodes)
 q_0_tilde_comp(q_0_tilde, X_0, B_con, l_b, n_q_tilde, n_B)
+
+! Parametri campo scalare di pressione
+
+REAL CONSTANT Lx, Ly, Lz
+
+Lx = nx * l_per
+Ly = 2
+Lz = nz * l_per
+
+INTEGER CONSTANT nx_f, ny_f, nz_f
+
+nx_f = 100
+ny_f = 100
+nz_f = 100
+
+REAL CONSTANT p
+p = 150
+
+INTEGER n_pan = n_P
+
+ARRAY(nz_f, nx_f, 2) OF REAL grid_points_2D = 0
+ARRAY(nz_f, nx_f, 2) OF INTEGER grid_pan = 0
+
+grid_comp_2D(grid_points_2D, grid_pan, P_mat, X_0, nx_f, ny_f, nz_f, n_pan, Lx, Ly, Lz)
 
 ! Simulazione
 
@@ -106,7 +131,8 @@ vec_to_csv_real(par_real_arr, "output/par_real_arr.csv")
 
 mat_to_csv_int(B_con, "output/B_con.csv")
 mat_to_csv_int(T_con, "output/T_con.csv")
-mat_to_csv_int(P_mat, "output/P_mat.csv")
+mat_to_csv_int(P_mat(*,*,1), "output/P_mat.csv")
+mat_to_csv_int(P_mat(*,*,2), "output/P_mat_per.csv")
 mat_to_csv_int(ghost_nodes, "output/ghost_nodes.csv")
 vec_to_csv_real(X_0, "output/X_0.csv")
 
@@ -114,4 +140,6 @@ mat_to_csv_real(q_tilde_arr, "output/q_tilde.csv")
 vec_to_csv_real(t_vec, "output/t.csv")
 
 ! Check 
+
+mat_to_csv_int(grid_pan(*,*,1), "output/grid_pan.csv")
 
