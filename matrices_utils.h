@@ -1170,7 +1170,7 @@ SUBROUTINE P_comp(ARRAY(*,3,2) OF INTEGER P_mat^; ARRAY(*,*) OF INTEGER ghost_no
     P_mat(1+floor_ind, 1, 2) = 5
     P_mat(1+floor_ind, 2, 1) = 4*(nz+(nx-1)*nz) - 1
     P_mat(1+floor_ind, 2, 2) = 0
-    P_mat(1+floor_ind, 3, 1) = 4*(1+(nx-1)*nx) - 3
+    P_mat(1+floor_ind, 3, 1) = 4*(1+(nx-1)*nz) - 3
     P_mat(1+floor_ind, 3, 2) = 5
 
     P_mat(2+floor_ind, 1, 1) = 4*(nz+(nx-1)*nz) - 1
@@ -1471,5 +1471,52 @@ SUBROUTINE P_comp(ARRAY(*,3,2) OF INTEGER P_mat^; ARRAY(*,*) OF INTEGER ghost_no
     P_mat(6+floor_ind, 2, 2) = 8
     P_mat(6+floor_ind, 3, 1) = 5
     P_mat(6+floor_ind, 3, 2) = 8
-
 END P_comp
+
+
+SUBROUTINE bar_lambda_comp(ARRAY(*,3) OF REAL bar_lambda_mat^; INTEGER n_int)
+
+    ARRAY(FLOOR(n_int*(n_int+1)/2), 3) OF REAL lambda_mat = 0
+
+    REAL d_lambda = 1.0/(n_int-1)
+    REAL lambda_1, lambda_2, lambda_3 = 0
+
+    LOOP FOR i = 0 TO n_int-1
+        LOOP FOR j = 0 TO n_int-i-1
+            lambda_3 = i*d_lambda
+            lambda_2 = j*d_lambda
+            lambda_1 = 1.0 - lambda_2 - lambda_3
+
+            lambda_mat(FLOOR(j+i*(2*n_int+1-i)/2+1), 1) = lambda_1
+            lambda_mat(FLOOR(j+i*(2*n_int+1-i)/2+1), 2) = lambda_2
+            lambda_mat(FLOOR(j+i*(2*n_int+1-i)/2+1), 3) = lambda_3
+        REPEAT
+    REPEAT
+
+    INTEGER count = 1
+
+    ARRAY(3) OF INTEGER sub_tri_vert_even = (1,     2,   n_int+1)
+    ARRAY(3) OF INTEGER sub_tri_vert_odd  = (2, n_int+1, n_int+2)
+
+    LOOP FOR i = 0 TO n_int-2
+        LOOP FOR j = 0 TO 2*(n_int-i-1)-2
+            IF j MOD 2 = 0 THEN
+                bar_lambda_mat(count, 1) = (lambda_mat(sub_tri_vert_even(1) + FLOOR(j/2), 1) + lambda_mat(sub_tri_vert_even(2) + FLOOR(j/2), 1) + lambda_mat(sub_tri_vert_even(3) + FLOOR(j/2), 1)) / 3
+                bar_lambda_mat(count, 2) = (lambda_mat(sub_tri_vert_even(1) + FLOOR(j/2), 2) + lambda_mat(sub_tri_vert_even(2) + FLOOR(j/2), 2) + lambda_mat(sub_tri_vert_even(3) + FLOOR(j/2), 2)) / 3
+                bar_lambda_mat(count, 3) = (lambda_mat(sub_tri_vert_even(1) + FLOOR(j/2), 3) + lambda_mat(sub_tri_vert_even(2) + FLOOR(j/2), 3) + lambda_mat(sub_tri_vert_even(3) + FLOOR(j/2), 3)) / 3
+            ELSE
+                bar_lambda_mat(count, 1) = (lambda_mat(sub_tri_vert_odd(1) + FLOOR((j-1)/2), 1) + lambda_mat(sub_tri_vert_odd(2) + FLOOR((j-1)/2), 1) + lambda_mat(sub_tri_vert_odd(3) + FLOOR((j-1)/2), 1)) / 3
+                bar_lambda_mat(count, 2) = (lambda_mat(sub_tri_vert_odd(1) + FLOOR((j-1)/2), 2) + lambda_mat(sub_tri_vert_odd(2) + FLOOR((j-1)/2), 2) + lambda_mat(sub_tri_vert_odd(3) + FLOOR((j-1)/2), 2)) / 3
+                bar_lambda_mat(count, 3) = (lambda_mat(sub_tri_vert_odd(1) + FLOOR((j-1)/2), 3) + lambda_mat(sub_tri_vert_odd(2) + FLOOR((j-1)/2), 3) + lambda_mat(sub_tri_vert_odd(3) + FLOOR((j-1)/2), 3)) / 3
+            END IF
+            count = count + 1
+        REPEAT
+        sub_tri_vert_even(1) = sub_tri_vert_even(1) + n_int - i
+        sub_tri_vert_even(2) = sub_tri_vert_even(2) + n_int - i
+        sub_tri_vert_even(3) = sub_tri_vert_even(3) + n_int - i - 1
+
+        sub_tri_vert_odd(1) = sub_tri_vert_odd(1) + n_int - i
+        sub_tri_vert_odd(2) = sub_tri_vert_odd(2) + n_int - i - 1
+        sub_tri_vert_odd(3) = sub_tri_vert_odd(3) + n_int - i - 1
+    REPEAT
+END bar_lambda_comp

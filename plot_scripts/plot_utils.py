@@ -34,9 +34,9 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
     #n_P = 61
     #n_N = 1
 
-    k_value = 0.01
+    k_value = 0.2
 
-    for i in range(n_P - 6*2*(nz+nx+2) - 2*2*(nz+nx)):
+    for i in range(n_P - 6*2*(nz+nx+2) - 2*2*(nz+nx)): #n_P - 6*2*(nz+nx+2) - 2*2*(nz+nx)
         ind_A = P_mat[i, 0]
         ind_B = P_mat[i, 1]
         ind_C = P_mat[i, 2]
@@ -55,7 +55,7 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
         #         [Y_A, Y_B, Y_C], cmap=cm.viridis,
         #             linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1)
         ax.plot_trisurf([Z_A, Z_B, Z_C], [X_A, X_B, X_C],
-                [Y_A, Y_B, Y_C], color='blue',
+                [Y_A, Y_B, Y_C], cmap="viridis",
                     linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1)
     
     offset = n_P - 6*2*(nz+nx+2) - 2*2*(nz+nx)
@@ -138,8 +138,8 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
             Z_C = Z_C + nz*l_per
 
         ax.plot_trisurf([Z_A, Z_B, Z_C], [X_A, X_B, X_C],
-                [Y_A, Y_B, Y_C],
-                    linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1, opacity=0.75)
+                [Y_A, Y_B, Y_C], cmap="viridis",
+                    linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1)
 
     # for i in range(n_N):
     #     if i < (n_N-n_G)//2 or i >= (n_N-n_G):

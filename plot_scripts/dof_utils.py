@@ -32,3 +32,4 @@ def X_comp(q_tilde, X_0, l_b, n_N, n_G, ghost_nodes, nx, nz, l_per):
 
     return X
          
+         

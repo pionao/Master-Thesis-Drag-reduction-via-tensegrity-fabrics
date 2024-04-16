@@ -8,7 +8,7 @@ from animation_utils import fabric_animation
 # Definizione parametri video
 
 fps            = 30
-video_duration = 1.0 # In seconds
+video_duration = 3.0 # In seconds
 
 
 # Import parametri fabric
