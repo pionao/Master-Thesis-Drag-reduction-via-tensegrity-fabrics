@@ -1,0 +1,439 @@
+! ------ TIMESTEP ROUTINE ------
+! ------
+
+! Define operators
+! ------
+#define laplu(f) f(1,0,0)*d2xpp+f(-1,0,0)*d2xpm+f(0,1,0)*d2yp+f(0,-1,0)*d2ym+f(0,0,1)*d2zp+f(0,0,-1)*d2zm-f(0,0,0)*(d2xp0+d2y0+d2z0)
+#define laplv(f) f(1,0,0)*d2xp+f(-1,0,0)*d2xm+f(0,1,0)*d2ypp+f(0,-1,0)*d2ypm+f(0,0,1)*d2zp+f(0,0,-1)*d2zm-f(0,0,0)*(d2x0+d2yp0+d2z0)
+#define laplw(f) f(1,0,0)*d2xp+f(-1,0,0)*d2xm+f(0,1,0)*d2yp+f(0,-1,0)*d2ym+f(0,0,1)*d2zpp+f(0,0,-1)*d2zpm-f(0,0,0)*(d2x0+d2y0+d2zp0)
+
+REAL FUNCTION limited(REAL x)= IF x<-1 THEN -0.9 ELSE x
+
+! Define the steps of the RK3 semi-explicit Runge-Kutta method and the Adams-Bashfort (unstable!)
+! ------
+SUBROUTINE AdamsB(REAL val^,oldrsd^,rsd)
+	val=val+deltat*[1.5*rsd-0.5*oldrsd]
+  	oldrsd=rsd
+END AdamsB
+
+SUBROUTINE rai1(REAL val^,oldrsd^,rsd)
+  	val=val+deltat*64/120*rsd
+  	oldrsd=rsd
+END rai1
+
+SUBROUTINE rai2(REAL val^,oldrsd^,rsd)
+  	val=val+deltat*(50/120*rsd-34/120*oldrsd)
+  	oldrsd=rsd
+END rai2
+
+SUBROUTINE rai3(REAL val^,oldrsd^,rsd)
+  	val=val+deltat*(90/120*rsd-50/120*oldrsd)
+END rai3
+
+! Linear step to use the imbc with the velocity
+newARRAY=ARRAY(1..nz-1,1..3) OF REAL
+
+
+SUBROUTINE linestep[SUBROUTINE(REAL val^,oldrsd^,rsd) timescheme; INTEGER ix,iy; REAL dts; POINTER TO newARRAY new]
+	LOOP FOR iz=1 TO nz-1
+    		new(iz)=var(ix,iy,iz,1..3)
+    		WITH var(ix+*,iy+*,iz+*),xc(ix),yc(iy),zc(iz)
+#ifdef EXTRA	
+#ifdef WALLS
+      		IF iz>=uimbc(ix,iy,*,0).LO AND iz<=Uuimbc(ix,iy,*,0).HI THEN ! XXX
+  			REAL rsdu=laplu(u)*nu-({[u(1,0,0)+u(0,0,0)]^2-[u(-1,0,0)+u(0,0,0)]^2}*d1xp+
+          			{[u(0,1,0)+u(0,0,0)]*[v(1,0,0)+v(0,0,0)]-[u(0,-1,0)+u(0,0,0)]*[v(1,-1,0)+v(0,-1,0)]}*d1y+
+	   			{[u(0,0,1)+u(0,0,0)]*[w(1,0,0)+w(0,0,0)]-[u(0,0,-1)+u(0,0,0)]*[w(1,0,-1)+w(0,0,-1)]}*d1z)/4*non_ph	 
+	   		IF iz<=uimbc(ix,iy,*,0).HI THEN rsdu = ~ + extra*uimbc_rhs(ix,iy,iz,0) * [uimbc_rhs(ix,iy,iz,1)*v(0,0,0)+uimbc_rhs(ix,iy,iz,2)*v(1,0,0)+uimbc_rhs(ix,iy,iz,3)*v(1,-1,0)+uimbc_rhs(ix,iy,iz,4)*v(0,-1,0)]
+	   		IF iz>=Uuimbc(ix,iy,*,0).LO THEN rsdu = ~ + extra*Uuimbc_rhs(ix,iy,iz,0) * [Uuimbc_rhs(ix,iy,iz,1)*v(0,0,0)+Uuimbc_rhs(ix,iy,iz,2)*v(1,0,0)+Uuimbc_rhs(ix,iy,iz,3)*v(1,-1,0)+Uuimbc_rhs(ix,iy,iz,4)*v(0,-1,0)]
+      			timescheme(new(iz,1),old(ix,iy,iz).u,rsdu)
+			new(iz,1)=~+(headx-[p(1,0,0)-p(0,0,0)]*d1xp)*dts		
+      			IF iz<=uimbc(ix,iy,*,0).HI THEN new(iz,1)=~/[1+limited[dts*uimbc(ix,iy,iz,0)]]
+      			IF iz>=Uuimbc(ix,iy,*,0).LO THEN new(iz,1)=~/[1+limited[dts*Uuimbc(ix,iy,iz,0)]]
+    		END IF
+    		
+   		IF iz>=vimbc(ix,iy,*,0).LO AND iz<=Uvimbc(ix,iy,*,0).HI THEN ! XXX
+      	   		REAL rsdv=laplv(v)*nu-({[v(0,1,0)+v(0,0,0)]^2-[v(0,-1,0)+v(0,0,0)]^2}*d1yp+
+      				{[v(1,0,0)+v(0,0,0)]*[u(0,1,0)+u(0,0,0)]-[v(-1,0,0)+v(0,0,0)]*[u(-1,1,0)+u(-1,0,0)]}*d1x+
+	   			{[v(0,0,1)+v(0,0,0)]*[w(0,1,0)+w(0,0,0)]-[v(0,0,-1)+v(0,0,0)]*[w(0,1,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+	   		IF iz<=vimbc(ix,iy,*,0).HI THEN rsdv = ~ + extra*vimbc_rhs(ix,iy,iz,0) * [vimbc_rhs(ix,iy,iz,1)*u(0,0,0)+vimbc_rhs(ix,iy,iz,2)*u(0,1,0)+vimbc_rhs(ix,iy,iz,3)*u(-1,1,0)+vimbc_rhs(ix,iy,iz,4)*u(-1,0,0)]
+	   		IF iz>=Uvimbc(ix,iy,*,0).LO THEN rsdv = ~ + extra*Uvimbc_rhs(ix,iy,iz,0) * [Uvimbc_rhs(ix,iy,iz,1)*u(0,0,0)+Uvimbc_rhs(ix,iy,iz,2)*u(0,1,0)+Uvimbc_rhs(ix,iy,iz,3)*u(-1,1,0)+Uvimbc_rhs(ix,iy,iz,4)*u(-1,0,0)]
+			timescheme(new(iz,2),old(ix,iy,iz).v,rsdv)
+     			new(iz,2)=~+(heady-[p(0,1,0)-p(0,0,0)]*d1yp)*dts	
+     			IF iz<=vimbc(ix,iy,*,0).HI THEN new(iz,2)=~/[1+limited[dts*vimbc(ix,iy,iz,0)]]
+			IF iz>=Uvimbc(ix,iy,*,0).LO THEN new(iz,2)=~/[1+limited[dts*Uvimbc(ix,iy,iz,0)]]
+    		END IF
+    		
+   		IF iz>=wimbc(ix,iy,*,0).LO AND iz<=Uwimbc(ix,iy,*,0).HI THEN ! XXX 
+      			REAL rsdw=laplw(w)*nu-({[w(0,0,1)+w(0,0,0)]^2-[w(0,0,-1)+w(0,0,0)]^2}*d1zp+
+	   			{[w(1,0,0)+w(0,0,0)]*[u(0,0,1)+u(0,0,0)]-[w(-1,0,0)+w(0,0,0)]*[u(-1,0,1)+u(-1,0,0)]}*d1x+
+	   			{[w(0,1,0)+w(0,0,0)]*[v(0,0,1)+v(0,0,0)]-[w(0,-1,0)+w(0,0,0)]*[v(0,-1,1)+v(0,-1,0)]}*d1y)/4*non_ph
+      			timescheme(new(iz,3),old(ix,iy,iz).w,rsdw)
+      			new(iz,3)=~-[p(0,0,1)-p(0,0,0)]*d1zp*dts
+     			IF iz<=wimbc(ix,iy,*,0).HI THEN new(iz,3)=~/[1+limited[dts*wimbc(ix,iy,iz,0)]]
+     			IF iz>=Uwimbc(ix,iy,*,0).LO THEN new(iz,3)=~/[1+limited[dts*Uwimbc(ix,iy,iz,0)]]
+    		END IF	
+#else
+		IF iz>=uimbc(ix,iy,*,0).LO THEN ! XXX
+  			REAL rsdu=laplu(u)*nu-({[u(1,0,0)+u(0,0,0)]^2-[u(-1,0,0)+u(0,0,0)]^2}*d1xp+
+          			{[u(0,1,0)+u(0,0,0)]*[v(1,0,0)+v(0,0,0)]-[u(0,-1,0)+u(0,0,0)]*[v(1,-1,0)+v(0,-1,0)]}*d1y+
+	   			{[u(0,0,1)+u(0,0,0)]*[w(1,0,0)+w(0,0,0)]-[u(0,0,-1)+u(0,0,0)]*[w(1,0,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+	   		IF iz<=uimbc(ix,iy,*,0).HI THEN rsdu = ~ + extra*uimbc_rhs(ix,iy,iz,0) * [uimbc_rhs(ix,iy,iz,1)*v(0,0,0)+uimbc_rhs(ix,iy,iz,2)*v(1,0,0)+uimbc_rhs(ix,iy,iz,3)*v(1,-1,0)+uimbc_rhs(ix,iy,iz,4)*v(0,-1,0)]
+      			timescheme(new(iz,1),old(ix,iy,iz).u,rsdu)
+			new(iz,1)=~+(headx-[p(1,0,0)-p(0,0,0)]*d1xp)*dts		
+      			IF iz<=uimbc(ix,iy,*,0).HI THEN new(iz,1)=~/[1+limited[dts*uimbc(ix,iy,iz,0)]]
+    		END IF
+    		
+   		IF iz>=vimbc(ix,iy,*,0).LO THEN ! XXX
+      	   		REAL rsdv=laplv(v)*nu-({[v(0,1,0)+v(0,0,0)]^2-[v(0,-1,0)+v(0,0,0)]^2}*d1yp+
+      				{[v(1,0,0)+v(0,0,0)]*[u(0,1,0)+u(0,0,0)]-[v(-1,0,0)+v(0,0,0)]*[u(-1,1,0)+u(-1,0,0)]}*d1x+
+	   			{[v(0,0,1)+v(0,0,0)]*[w(0,1,0)+w(0,0,0)]-[v(0,0,-1)+v(0,0,0)]*[w(0,1,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+	   		IF iz<=vimbc(ix,iy,*,0).HI THEN rsdv = ~ + extra*vimbc_rhs(ix,iy,iz,0) * [vimbc_rhs(ix,iy,iz,1)*u(0,0,0)+vimbc_rhs(ix,iy,iz,2)*u(0,1,0)+vimbc_rhs(ix,iy,iz,3)*u(-1,1,0)+vimbc_rhs(ix,iy,iz,4)*u(-1,0,0)]
+   			timescheme(new(iz,2),old(ix,iy,iz).v,rsdv)
+     			new(iz,2)=~+(heady-[p(0,1,0)-p(0,0,0)]*d1yp)*dts	
+     			IF iz<=vimbc(ix,iy,*,0).HI THEN new(iz,2)=~/[1+limited[dts*vimbc(ix,iy,iz,0)]]
+    		END IF
+    		
+   		IF iz>=wimbc(ix,iy,*,0).LO AND iz<nz-1 THEN ! XXX 
+      			REAL rsdw=laplw(w)*nu-({[w(0,0,1)+w(0,0,0)]^2-[w(0,0,-1)+w(0,0,0)]^2}*d1zp+
+	   			{[w(1,0,0)+w(0,0,0)]*[u(0,0,1)+u(0,0,0)]-[w(-1,0,0)+w(0,0,0)]*[u(-1,0,1)+u(-1,0,0)]}*d1x+
+	   			{[w(0,1,0)+w(0,0,0)]*[v(0,0,1)+v(0,0,0)]-[w(0,-1,0)+w(0,0,0)]*[v(0,-1,1)+v(0,-1,0)]}*d1y)/4*non_ph
+      			timescheme(new(iz,3),old(ix,iy,iz).w,rsdw)
+      			new(iz,3)=~-[p(0,0,1)-p(0,0,0)]*d1zp*dts
+     			IF iz<=wimbc(ix,iy,*,0).HI THEN new(iz,3)=~/[1+limited[dts*wimbc(ix,iy,iz,0)]]
+    		END IF
+#endif
+#else
+#ifdef WALLS
+      		IF iz>=uimbc(ix,iy).LO AND iz<=Uuimbc(ix,iy).HI THEN ! XXX
+  			REAL rsdu=laplu(u)*nu-({[u(1,0,0)+u(0,0,0)]^2-[u(-1,0,0)+u(0,0,0)]^2}*d1xp+
+          			{[u(0,1,0)+u(0,0,0)]*[v(1,0,0)+v(0,0,0)]-[u(0,-1,0)+u(0,0,0)]*[v(1,-1,0)+v(0,-1,0)]}*d1y+
+	   			{[u(0,0,1)+u(0,0,0)]*[w(1,0,0)+w(0,0,0)]-[u(0,0,-1)+u(0,0,0)]*[w(1,0,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+      			timescheme(new(iz,1),old(ix,iy,iz).u,rsdu)
+			new(iz,1)=~+(headx-[p(1,0,0)-p(0,0,0)]*d1xp)*dts
+      			IF iz<=uimbc(ix,iy).HI THEN new(iz,1)=~/[1+limited[dts*uimbc(ix,iy,iz)]]
+      			IF iz>=Uuimbc(ix,iy).LO THEN new(iz,1)=~/[1+limited[dts*Uuimbc(ix,iy,iz)]]
+    		END IF
+    		
+   		IF iz>=vimbc(ix,iy).LO AND iz<=Uvimbc(ix,iy).HI THEN ! XXX
+      	   		REAL rsdv=laplv(v)*nu-({[v(0,1,0)+v(0,0,0)]^2-[v(0,-1,0)+v(0,0,0)]^2}*d1yp+
+      				{[v(1,0,0)+v(0,0,0)]*[u(0,1,0)+u(0,0,0)]-[v(-1,0,0)+v(0,0,0)]*[u(-1,1,0)+u(-1,0,0)]}*d1x+
+	   			{[v(0,0,1)+v(0,0,0)]*[w(0,1,0)+w(0,0,0)]-[v(0,0,-1)+v(0,0,0)]*[w(0,1,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+			timescheme(new(iz,2),old(ix,iy,iz).v,rsdv)
+     			new(iz,2)=~+(heady-[p(0,1,0)-p(0,0,0)]*d1yp)*dts	
+     			IF iz<=vimbc(ix,iy).HI THEN new(iz,2)=~/[1+limited[dts*vimbc(ix,iy,iz)]]
+			IF iz>=Uvimbc(ix,iy).LO THEN new(iz,2)=~/[1+limited[dts*Uvimbc(ix,iy,iz)]]
+    		END IF
+    		
+   		IF iz>=wimbc(ix,iy).LO AND iz<=Uwimbc(ix,iy).HI THEN ! XXX 
+      			REAL rsdw=laplw(w)*nu-({[w(0,0,1)+w(0,0,0)]^2-[w(0,0,-1)+w(0,0,0)]^2}*d1zp+
+	   			{[w(1,0,0)+w(0,0,0)]*[u(0,0,1)+u(0,0,0)]-[w(-1,0,0)+w(0,0,0)]*[u(-1,0,1)+u(-1,0,0)]}*d1x+
+	   			{[w(0,1,0)+w(0,0,0)]*[v(0,0,1)+v(0,0,0)]-[w(0,-1,0)+w(0,0,0)]*[v(0,-1,1)+v(0,-1,0)]}*d1y)/4*non_ph
+      			timescheme(new(iz,3),old(ix,iy,iz).w,rsdw)
+      			new(iz,3)=~-[p(0,0,1)-p(0,0,0)]*d1zp*dts
+     			IF iz<=wimbc(ix,iy).HI THEN 
+     			   new(iz,3)=~/[1+limited[dts*wimbc(ix,iy,iz)]]
+#ifdef MOVING WALLS
+     			   new(iz,3)=~dts*wimbc(ix,iy,iz)/[1+limited[dts*wimbc(ix,iy,iz)]] * wbc(geometry,xd(ix),yd(iy))
+#endif
+                       END IF
+     			IF iz>=Uwimbc(ix,iy).LO THEN 
+     			   new(iz,3)=~/[1+limited[dts*Uwimbc(ix,iy,iz)]]
+#ifdef MOVING WALLS
+     			   new(iz,3)=~dts*Uwimbc(ix,iy,iz)/[1+limited[dts*Uwimbc(ix,iy,iz)]] * Uwbc(geometry,xd(ix),yd(iy))
+#endif
+                       END IF
+    		END IF	
+#else
+		IF iz>=uimbc(ix,iy).LO THEN ! XXX
+  			REAL rsdu=laplu(u)*nu-({[u(1,0,0)+u(0,0,0)]^2-[u(-1,0,0)+u(0,0,0)]^2}*d1xp+
+          			{[u(0,1,0)+u(0,0,0)]*[v(1,0,0)+v(0,0,0)]-[u(0,-1,0)+u(0,0,0)]*[v(1,-1,0)+v(0,-1,0)]}*d1y+
+	   			{[u(0,0,1)+u(0,0,0)]*[w(1,0,0)+w(0,0,0)]-[u(0,0,-1)+u(0,0,0)]*[w(1,0,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+      			timescheme(new(iz,1),old(ix,iy,iz).u,rsdu)
+			new(iz,1)=~+(headx-[p(1,0,0)-p(0,0,0)]*d1xp)*dts		
+      			IF iz<=uimbc(ix,iy).HI THEN new(iz,1)=~/[1+limited[dts*uimbc(ix,iy,iz)]]
+    		END IF
+    		
+   		IF iz>=vimbc(ix,iy).LO THEN ! XXX
+      	   		REAL rsdv=laplv(v)*nu-({[v(0,1,0)+v(0,0,0)]^2-[v(0,-1,0)+v(0,0,0)]^2}*d1yp+
+      				{[v(1,0,0)+v(0,0,0)]*[u(0,1,0)+u(0,0,0)]-[v(-1,0,0)+v(0,0,0)]*[u(-1,1,0)+u(-1,0,0)]}*d1x+
+	   			{[v(0,0,1)+v(0,0,0)]*[w(0,1,0)+w(0,0,0)]-[v(0,0,-1)+v(0,0,0)]*[w(0,1,-1)+w(0,0,-1)]}*d1z)/4*non_ph
+   			timescheme(new(iz,2),old(ix,iy,iz).v,rsdv)
+     			new(iz,2)=~+(heady-[p(0,1,0)-p(0,0,0)]*d1yp)*dts
+     			IF iz<=vimbc(ix,iy).HI THEN new(iz,2)=~/[1+limited[dts*vimbc(ix,iy,iz)]]
+    		END IF
+    		
+   		IF iz>=wimbc(ix,iy).LO AND iz<nz-1 THEN ! XXX 
+      			REAL rsdw=laplw(w)*nu-({[w(0,0,1)+w(0,0,0)]^2-[w(0,0,-1)+w(0,0,0)]^2}*d1zp+
+	   			{[w(1,0,0)+w(0,0,0)]*[u(0,0,1)+u(0,0,0)]-[w(-1,0,0)+w(0,0,0)]*[u(-1,0,1)+u(-1,0,0)]}*d1x+
+	   			{[w(0,1,0)+w(0,0,0)]*[v(0,0,1)+v(0,0,0)]-[w(0,-1,0)+w(0,0,0)]*[v(0,-1,1)+v(0,-1,0)]}*d1y)/4*non_ph
+      			timescheme(new(iz,3),old(ix,iy,iz).w,rsdw)
+      			new(iz,3)=~-[p(0,0,1)-p(0,0,0)]*d1zp*dts
+     			IF iz<=wimbc(ix,iy).HI THEN 
+     			   new(iz,3)=~/[1+limited[dts*wimbc(ix,iy,iz)]]
+#ifdef MOVING WALLS
+     			   new(iz,3)=~dts*wimbc(ix,iy,iz)/[1+limited[dts*wimbc(ix,iy,iz)]] * wbc(geometry,xd(ix),yd(iy))
+#endif
+                       END IF     			
+    		END IF
+#endif
+#endif
+
+  	REPEAT
+  	
+END linestep
+
+! Define the LU decomposition for dz
+! ------
+REAL M(1..nz-1,-1..1)
+sor=1.5
+
+! Linear step to upgrade the pressure field
+! ------
+SUBROUTINE pressurelinestep(INTEGER ix,iy; REAL dts)
+	ARRAY(1..nz-1) OF REAL phi
+  	LOOP FOR iz=1 TO nz-1
+    		WITH var(ix+*,iy+*,iz+*),xc(ix),yc(iy),zc(iz)
+    		phi(iz)={[u(0,0,0)-u(-1,0,0)]*d1x+[v(0,0,0)-v(0,-1,0)]*d1y+[w(0,0,0)-w(0,0,-1)]*d1z}*sor
+    		M(iz,-1)=zc(iz).d2zm
+  		M(iz,1)=zc(iz).d2zp
+  		M(iz,0)=-xc(ix).d2x0-yc(iy).d2y0-zc(iz).d2z0
+  	REPEAT
+  	M(LO,0)=~+M(LO,-1)
+	M(HI,0)=~+M(HI,1)
+  	LUdecomp M
+  	phi=M\~
+  	LOOP FOR iz=1 TO nz-1
+    		BOOLEAN updatep=NO
+    		WITH var(ix+*,iy+*,iz+*)
+#ifdef EXTRA    		
+#ifdef WALLS
+    		IF iz>=uimbc(ix,iy,*,0).LO AND iz<=Uuimbc(ix,iy,*,0).HI THEN updatep=YES; u(0,0,0)=~+phi(iz)*{IF iz<=uimbc(ix,iy,*,0).HI THEN xc(ix).d1xp/[1+dts*uimbc(ix,iy,iz,0)] ELSE IF iz>=Uuimbc(ix,iy,*,0).LO THEN xc(ix).d1xp/[1+dts*Uuimbc(ix,iy,iz,0)] ELSE xc(ix).d1xp}
+    		IF iz>=uimbc(ix-1,iy,*,0).LO AND iz<=Uuimbc(ix-1,iy,*,0).HI THEN updatep=YES; u(-1,0,0)=~-phi(iz)*{IF iz<=uimbc(ix-1,iy,*,0).HI THEN xc(ix-1).d1xp/[1+dts*uimbc(ix-1,iy,iz,0)] ELSE IF iz>=Uuimbc(ix-1,iy,*,0).LO THEN xc(ix-1).d1xp/[1+dts*Uuimbc(ix-1,iy,iz,0)] ELSE xc(ix-1).d1xp}
+   
+    		IF iz>=vimbc(ix,iy,*,0).LO AND iz<=Uvimbc(ix,iy,*,0).HI THEN updatep=YES; v(0,0,0)=~+phi(iz)*{IF iz<=vimbc(ix,iy,*,0).HI THEN yc(iy).d1yp/[1+dts*vimbc(ix,iy,iz,0)] ELSE IF iz>=Uvimbc(ix,iy,*,0).LO THEN yc(iy).d1yp/[1+dts*Uvimbc(ix,iy,iz,0)] ELSE yc(iy).d1yp}
+    		IF iz>=vimbc(ix,iy-1,*,0).LO AND iz<=Uvimbc(ix,iy-1,*,0).HI THEN updatep=YES; v(0,-1,0)=~-phi(iz)*{IF iz<=vimbc(ix,iy-1,*,0).HI THEN yc(iy-1).d1yp/[1+dts*vimbc(ix,iy-1,iz,0)] ELSE IF iz>=Uvimbc(ix,iy-1,*,0).LO THEN yc(iy-1).d1yp/[1+dts*Uvimbc(ix,iy-1,iz,0)] ELSE yc(iy-1).d1yp}
+        
+    		IF iz>=wimbc(ix,iy,*,0).LO AND iz<=Uwimbc(ix,iy,*,0).HI THEN updatep=YES; w(0,0,0)=~+phi(iz)*{IF iz<=wimbc(ix,iy,*,0).HI THEN zc(iz).d1zp/[1+dts*wimbc(ix,iy,iz,0)] ELSE IF iz>=Uwimbc(ix,iy,*,0).LO THEN zc(iz).d1zp/[1+dts*Uwimbc(ix,iy,iz,0)] ELSE zc(iz).d1zp}
+    		IF iz-1>=wimbc(ix,iy,*,0).LO AND iz-1<=Uwimbc(ix,iy,*,0).HI THEN updatep=YES; w(0,0,-1)=~-phi(iz)*{IF iz-1<=wimbc(ix,iy,*,0).HI THEN zc(iz-1).d1zp/[1+dts*wimbc(ix,iy,iz-1,0)] ELSE IF iz-1>=Uwimbc(ix,iy,*,0).LO THEN zc(iz-1).d1zp/[1+dts*Uwimbc(ix,iy,iz-1,0)] ELSE zc(iz-1).d1zp}  		
+#else
+    		IF iz>=uimbc(ix,iy,*,0).LO THEN updatep=YES; u(0,0,0)=~+phi(iz)*{IF iz<=uimbc(ix,iy,*,0).HI THEN xc(ix).d1xp/[1+limited[dts*uimbc(ix,iy,iz,0)]] ELSE xc(ix).d1xp}
+    		IF iz>=uimbc(ix-1,iy,*,0).LO THEN updatep=YES; u(-1,0,0)=~-phi(iz)*{IF iz<=uimbc(ix-1,iy,*,0).HI THEN xc(ix-1).d1xp/[1+limited[dts*uimbc(ix-1,iy,iz,0)]] ELSE xc(ix-1).d1xp}
+    		IF iz>=vimbc(ix,iy,*,0).LO THEN updatep=YES; v(0,0,0)=~+phi(iz)*{IF iz<=vimbc(ix,iy,*,0).HI THEN yc(iy).d1yp/[1+limited[dts*vimbc(ix,iy,iz,0)]] ELSE yc(iy).d1yp}
+    		IF iz>=vimbc(ix,iy-1,*,0).LO THEN updatep=YES; v(0,-1,0)=~-phi(iz)*{IF iz<=vimbc(ix,iy-1,*,0).HI THEN yc(iy-1).d1yp/[1+limited[dts*vimbc(ix,iy-1,iz,0)]] ELSE yc(iy-1).d1yp}
+    		IF iz<nz-1 AND iz>=wimbc(ix,iy,*,0).LO THEN updatep=YES; w(0,0,0)=~+phi(iz)*{IF iz<=wimbc(ix,iy,*,0).HI THEN zc(iz).d1zp/[1+limited[dts*wimbc(ix,iy,iz,0)]] ELSE zc(iz).d1zp}
+    		IF iz-1>=wimbc(ix,iy,*,0).LO THEN updatep=YES; w(0,0,-1)=~-phi(iz)*{IF iz-1<=wimbc(ix,iy,*,0).HI THEN zc(iz-1).d1zp/[1+limited[dts*wimbc(ix,iy,iz-1,0)]] ELSE zc(iz-1).d1zp}		
+#endif
+#else
+#ifdef WALLS
+    		IF iz>=uimbc(ix,iy).LO AND iz<=Uuimbc(ix,iy).HI THEN updatep=YES; u(0,0,0)=~+phi(iz)*{IF iz<=uimbc(ix,iy).HI THEN xc(ix).d1xp/[1+dts*uimbc(ix,iy,iz)] ELSE IF iz>=Uuimbc(ix,iy).LO THEN xc(ix).d1xp/[1+dts*Uuimbc(ix,iy,iz)] ELSE xc(ix).d1xp}
+    		IF iz>=uimbc(ix-1,iy).LO AND iz<=Uuimbc(ix-1,iy).HI THEN updatep=YES; u(-1,0,0)=~-phi(iz)*{IF iz<=uimbc(ix-1,iy).HI THEN xc(ix-1).d1xp/[1+dts*uimbc(ix-1,iy,iz)] ELSE IF iz>=Uuimbc(ix-1,iy).LO THEN xc(ix-1).d1xp/[1+dts*Uuimbc(ix-1,iy,iz)] ELSE xc(ix-1).d1xp}
+  
+    		IF iz>=vimbc(ix,iy).LO AND iz<=Uvimbc(ix,iy).HI THEN updatep=YES; v(0,0,0)=~+phi(iz)*{IF iz<=vimbc(ix,iy).HI THEN yc(iy).d1yp/[1+dts*vimbc(ix,iy,iz)] ELSE IF iz>=Uvimbc(ix,iy).LO THEN yc(iy).d1yp/[1+dts*Uvimbc(ix,iy,iz)] ELSE yc(iy).d1yp}
+    		IF iz>=vimbc(ix,iy-1).LO AND iz<=Uvimbc(ix,iy-1).HI THEN updatep=YES; v(0,-1,0)=~-phi(iz)*{IF iz<=vimbc(ix,iy-1).HI THEN yc(iy-1).d1yp/[1+dts*vimbc(ix,iy-1,iz)] ELSE IF iz>=Uvimbc(ix,iy-1).LO THEN yc(iy-1).d1yp/[1+dts*Uvimbc(ix,iy-1,iz)] ELSE yc(iy-1).d1yp}
+        
+    		IF iz>=wimbc(ix,iy).LO AND iz<=Uwimbc(ix,iy).HI THEN updatep=YES; w(0,0,0)=~+phi(iz)*{IF iz<=wimbc(ix,iy).HI THEN zc(iz).d1zp/[1+dts*wimbc(ix,iy,iz)] ELSE IF iz>=Uwimbc(ix,iy).LO THEN zc(iz).d1zp/[1+dts*Uwimbc(ix,iy,iz)] ELSE zc(iz).d1zp}
+    		IF iz-1>=wimbc(ix,iy).LO AND iz-1<=Uwimbc(ix,iy).HI THEN updatep=YES; w(0,0,-1)=~-phi(iz)*{IF iz-1<=wimbc(ix,iy).HI THEN zc(iz-1).d1zp/[1+dts*wimbc(ix,iy,iz-1)] ELSE IF iz-1>=Uwimbc(ix,iy).LO THEN zc(iz-1).d1zp/[1+dts*Uwimbc(ix,iy,iz-1)] ELSE zc(iz-1).d1zp}  		
+#else
+    		IF iz>=uimbc(ix,iy).LO THEN updatep=YES; u(0,0,0)=~+phi(iz)*{IF iz<=uimbc(ix,iy).HI THEN xc(ix).d1xp/[1+dts*uimbc(ix,iy,iz)] ELSE xc(ix).d1xp}
+    		IF iz>=uimbc(ix-1,iy).LO THEN updatep=YES; u(-1,0,0)=~-phi(iz)*{IF iz<=uimbc(ix-1,iy).HI THEN xc(ix-1).d1xp/[1+dts*uimbc(ix-1,iy,iz)] ELSE xc(ix-1).d1xp}
+    		IF iz>=vimbc(ix,iy).LO THEN updatep=YES; v(0,0,0)=~+phi(iz)*{IF iz<=vimbc(ix,iy).HI THEN yc(iy).d1yp/[1+dts*vimbc(ix,iy,iz)] ELSE yc(iy).d1yp}
+    		IF iz>=vimbc(ix,iy-1).LO THEN updatep=YES; v(0,-1,0)=~-phi(iz)*{IF iz<=vimbc(ix,iy-1).HI THEN yc(iy-1).d1yp/[1+dts*vimbc(ix,iy-1,iz)] ELSE yc(iy-1).d1yp}
+    		IF iz<nz-1 AND iz>=wimbc(ix,iy).LO THEN updatep=YES; w(0,0,0)=~+phi(iz)*{IF iz<=wimbc(ix,iy).HI THEN zc(iz).d1zp/[1+dts*wimbc(ix,iy,iz)] ELSE zc(iz).d1zp}
+    		IF iz-1>=wimbc(ix,iy).LO THEN updatep=YES; w(0,0,-1)=~-phi(iz)*{IF iz-1<=wimbc(ix,iy).HI THEN zc(iz-1).d1zp/[1+dts*wimbc(ix,iy,iz-1)] ELSE zc(iz-1).d1zp}	
+#endif
+#endif    		
+    		IF updatep THEN p(0,0,0)=~+phi(iz)/dts
+  	REPEAT
+END pressurelinestep
+
+! Define the function to get the CFL and Fourier number + any quantity useful to debug
+! This routine is called once every it_cfl iterations, so it is clever to use it to get some quantities of the current flow.
+! Any number of scalars can be added do this array, but REMEMBER TO MODIFY THE DIMENSION OF THIS ARRAY AT THE inputs SECTION OF THE MAIN.
+! ------
+SUBROUTINE get_cfl() ! XXX Should we consider the IBM in the definition of the CFL?
+		     ! Still open doubt, but cflmax = 0.5 and fouriermax = 0.5 work.
+	cfl=0
+#ifdef EXTRA
+#ifdef WALLS
+     	LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+       		DO WITH var(ix,iy,iz):
+			! Evaluate the CFL
+         		cfl(0)=MAX{cfl(0),MAX[ABS(u)]*xc(ix).d1x+MAX[ABS(v)]*yc(iy).d1y+MAX[ABS(w)]*zc(iz).d1z}
+         		! Evaluate the Fourier number
+         		
+         		cfl(1)=MAX{cfl(1),nu*(MAX[xc(ix).d1xm*xc(ix).d1x,xc(ix).d1x*xc(ix).d1xp,xc(ix).d1xp/(xd(2*ix+3)-xd(2*ix+1))]+MAX[yc(iy).d1ym*yc(iy).d1y,yc(iy).d1y*yc(iy).d1yp,yc(iy).d1yp/(yd(2*iy+3)-yd(2*iy+1))]+MAX[zc(iz).d1zm*zc(iz).d1z,zc(iz).d1z*zc(iz).d1zp,zc(iz).d1zp/(zd(2*iz+3)-zd(2*iz+1))]}
+         		
+         		
+			!cfl(1)=MAX{cfl(1),nu*(0.5*(zc(iz).d2z0+yc(iy).d2y0+xc(ix).d2x0)), nu*(0.5*yc(iy).d1y*yc(iy).d1y), nu*(0.5*xc(ix).d1x*xc(ix).d1x) }    ! CONTROLLA STABILITA RK3 
+         		! Evaluate the residual of the maximum value of u
+			!cfl(2)=MAX{cfl(2),ABS(u-varold(ix,iy,iz).u)}
+       		FOR iz=vimbc(ix,iy,*,0).LO TO nz-vimbc(ix,iy,*,0).LO
+     	REPEAT
+#else
+     	LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+		DO WITH var(ix,iy,iz):
+			! Evaluate the CFL
+         		cfl(0)=MAX{cfl(0),MAX[ABS(u)]*xc(ix).d1x+MAX[ABS(v)]*yc(iy).d1y+MAX[ABS(w)]*zc(iz).d1z}
+         		! Evaluate the Fourier number
+			cfl(1)=MAX{cfl(1),nu*(0.5*(zc(iz).d2z0+yc(iy).d2y0+xc(ix).d2x0)), nu*(0.5*yc(iy).d1y*yc(iy).d1y), nu*(0.5*xc(ix).d1x*xc(ix).d1x) }
+         		! Evaluate the residual of the maximum value of u
+			!cfl(2)=MAX{cfl(2),ABS(u-varold(ix,iy,iz).u)}
+       		FOR iz=vimbc(ix,iy,*,0).LO TO nz-1
+     	REPEAT
+#endif
+#else
+#ifdef WALLS
+     	LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+       		DO WITH var(ix,iy,iz):
+			! Evaluate the CFL
+         		cfl(0)=MAX{cfl(0),MAX[ABS(u)]*xc(ix).d1x+MAX[ABS(v)]*yc(iy).d1y+MAX[ABS(w)]*zc(iz).d1z}
+         		! Evaluate the Fourier number
+			cfl(1)=MAX{cfl(1),nu*(MAX[xc(ix).d1xm*xc(ix).d1x,xc(ix).d1x*xc(ix).d1xp,xc(ix).d1xp/(xd(2*ix+3)-xd(2*ix+1))]+MAX[yc(iy).d1ym*yc(iy).d1y,yc(iy).d1y*yc(iy).d1yp,yc(iy).d1yp/(yd(2*iy+3)-yd(2*iy+1))]+MAX[zc(iz).d1zm*zc(iz).d1z,zc(iz).d1z*zc(iz).d1zp,zc(iz).d2zpp])}
+         		! Evaluate the residual of the maximum value of u
+			!cfl(2)=MAX{cfl(2),ABS(u-varold(ix,iy,iz).u)}
+       		FOR iz=vimbc(ix,iy).LO TO nz-vimbc(ix,iy).LO
+     	REPEAT
+#else
+     	LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+		DO WITH var(ix,iy,iz):
+			! Evaluate the CFL
+         		cfl(0)=MAX{cfl(0),MAX[ABS(u)]*xc(ix).d1x+MAX[ABS(v)]*yc(iy).d1y+MAX[ABS(w)]*zc(iz).d1z}
+         		!cfl(0)=MAX{cfl(0),ABS(u)*xc(ix).d1x+ABS(v)*yc(iy).d1y+ABS(w)*zc(iz).d1z}
+         		! Evaluate the Fourier number
+         		!dx2 = 0.5*()
+			!cfl(1)=MAX{cfl(1),nu*(0.5*(zc(iz).d2z0+yc(iy).d2y0+xc(ix).d2x0)), nu*(0.5*(zc(iz).d2z0+yc(iy).d2y0+xc(ix).d2x0)), nu*(0.5*(zc(iz).d2z0+yc(iy).d2y0+xc(ix).d2x0)) }
+			cfl(1)=MAX{cfl(1),nu*(MAX[xc(ix).d1xm*xc(ix).d1x,xc(ix).d1x*xc(ix).d1xp,xc(ix).d1xp/(xd(2*ix+3)-xd(2*ix+1))]+MAX[yc(iy).d1ym*yc(iy).d1y,yc(iy).d1y*yc(iy).d1yp,yc(iy).d1yp/(yd(2*iy+3)-yd(2*iy+1))]+MAX[zc(iz).d1zm*zc(iz).d1z,zc(iz).d1z*zc(iz).d1zp,zc(iz).d2zpp])}
+         		! Evaluate the residual of the maximum value of u
+			!cfl(2)=MAX{cfl(2),ABS(u-varold(ix,iy,iz).u)}
+       		FOR iz=vimbc(ix,iy).LO TO nz-1
+     	REPEAT
+#endif
+#endif
+     	getmax(cfl)
+END get_cfl
+
+
+! Time step advance in time
+! ------
+SUBROUTINE timestep[SUBROUTINE(REAL val^,oldrsd^,rsd) timescheme]
+  	pbc(var(*,*,**))
+  	REAL dts=0, testval=1
+  	timescheme(dts,testval,testval)		
+  	newARRAY new(var.LO1+1..var.HI1-1,var.LO2+1..var.HI2-1)
+  	LOOP FOR ix=var.LO1+2 TO var.HI1-2 AND iy=var.LO2+2 TO var.HI2-2
+    		linestep(timescheme,ix,iy,dts,new(ix,iy))									! Qui rsd contiene laplaciano, termini non lineari, grad p
+  	REPEAT
+  	pbcwait
+  	LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+    		EXCEPT ix>var.LO1+1 AND ix<var.HI1-1 AND iy>var.LO2+1 AND iy<var.HI2-1
+    		linestep(timescheme,ix,iy,dts,new(ix,iy))									! Per i punti al confine tra piu cores
+  	REPEAT
+  	var(LO+1..HI-1,LO+1..HI-1,1..nz-1,1..3)=new
+  	pbc(var(*,*,**),var(*,*,**),-1)
+  	pbcwait
+  	LOOP FOR 3 TIMES AND parity=0 TO 1
+    		pbcp(var.u,var.v,parity)
+    		LOOP FOR ix=var.LO1+2 TO var.HI1-1 AND iy=var.LO2+2+(var.LO2+ix+parity) MOD 2 TO var.HI2-1 BY 2    		! BY 2 significa che fai loop tra 'a' e 'b' con step di 2
+      			pressurelinestep(ix,iy,dts)
+    		REPEAT
+    		pbcwait
+    		LOOP FOR ix=var.LO1+1 TO var.HI1 AND iy=var.LO2+2-(var.LO2+ix+parity) MOD 2 TO var.HI2 BY 2
+      			EXCEPT ix>var.LO1+1 AND ix<var.HI1 AND iy>var.LO2+1 AND iy<var.HI2
+      			pressurelinestep(ix,iy,dts)
+    		REPEAT
+  	REPEAT
+	! Define the flowrate, to be upgraded only at this point.
+	! ------
+  	flowrate=0
+  	REAL uarea=0
+  	REAL varea=0
+  	LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+  		WITH xc(ix),yc(iy)
+    		uarea=~+1/d1xp/d1y
+    		varea=~+1/d1x/d1yp
+    		
+#ifdef EXTRA
+#ifdef WALLS
+    		flowrate.x=~+({SUM [var(ix,iy,iz).u]/zc(iz).d1z FOR iz=uimbc(ix,iy,*,0).LO TO Uuimbc(ix,iy,*,0).HI}-flowrate.x)/d1xp/d1y/uarea
+    		flowrate.y=~+({SUM [var(ix,iy,iz).v]/zc(iz).d1z FOR iz=vimbc(ix,iy,*,0).LO TO Uvimbc(ix,iy,*,0).HI}-flowrate.y)/d1x/d1yp/varea
+#else
+    		flowrate.x=~+({SUM [var(ix,iy,iz).u]/zc(iz).d1z FOR iz=uimbc(ix,iy,*,0).LO TO nz-1}-flowrate.x)/d1xp/d1y/uarea
+    		flowrate.y=~+({SUM [var(ix,iy,iz).v]/zc(iz).d1z FOR iz=vimbc(ix,iy,*,0).LO TO nz-1}-flowrate.y)/d1x/d1yp/varea
+#endif
+#else
+#ifdef WALLS
+    		flowrate.x=~+({SUM [var(ix,iy,iz).u]/zc(iz).d1z FOR iz=uimbc(ix,iy).LO TO Uuimbc(ix,iy).HI}-flowrate.x)/d1xp/d1y/uarea
+    		flowrate.y=~+({SUM [var(ix,iy,iz).v]/zc(iz).d1z FOR iz=vimbc(ix,iy).LO TO Uvimbc(ix,iy).HI}-flowrate.y)/d1x/d1yp/varea
+#else
+    		flowrate.x=~+({SUM [var(ix,iy,iz).u]/zc(iz).d1z FOR iz=uimbc(ix,iy).LO TO nz-1}-flowrate.x)/d1xp/d1y/uarea
+    		flowrate.y=~+({SUM [var(ix,iy,iz).v]/zc(iz).d1z FOR iz=vimbc(ix,iy).LO TO nz-1}-flowrate.y)/d1x/d1yp/varea
+#endif
+#endif
+  	REPEAT
+
+ 	accumulate(flowrate)
+
+
+! If a constant flow rate simulation is running, the pressure gradient must be corrected to keep UFR and VFR constant.
+! If a constant pressure gradient simulation is running, this IF is skipped
+! ------
+#ifndef cpg
+  		dum=(UFR-flowrate.x/nprocx/nprocy)/zd(2*nz)
+  		dvm=(VFR-flowrate.y/nprocx/nprocy)/zd(2*nz)
+#ifdef EXTRA
+#ifdef WALLS
+  		DO var(ix,iy,iz).u=~+(IF iz>uimbc(ix,iy,*,0).HI AND iz<Uuimbc(ix,iy,*,0).LO THEN
+			                 dum
+		                      ELSE IF iz<=uimbc(ix,iy,*,0).HI THEN dum/[1+limited[dts*uimbc(ix,iy,iz,0)]]
+		                      ELSE dum/[1+limited[dts*Uuimbc(ix,iy,iz,0)]] ) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=uimbc(ix,iy,*,0).LO TO Uuimbc(ix,iy,*,0).HI
+  		headx=~+dum/dts
+  		DO var(ix,iy,iz).v=~+(IF iz>vimbc(ix,iy,*,0).HI AND iz<Uvimbc(ix,iy,*,0).LO THEN
+			                dvm
+		                      ELSE IF iz<=vimbc(ix,iy,*,0).HI THEN dum/[1+limited[dts*vimbc(ix,iy,iz,0)]]
+		                      ELSE dvm/[1+limited[dts*Uvimbc(ix,iy,iz,0)]] ) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=vimbc(ix,iy,*,0).LO TO Uvimbc(ix,iy,*,0).HI
+  		heady=~+dvm/dts
+#else
+  		DO var(ix,iy,iz).u=~+(IF iz>uimbc(ix,iy,*,0).HI THEN
+			                dum
+		                      ELSE dum/[1+limited[dts*uimbc(ix,iy,iz,0)]]) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=uimbc(ix,iy,*,0).LO TO nz-1
+  		headx=~+dum/dts
+  		DO var(ix,iy,iz).v=~+(IF iz>vimbc(ix,iy,*,0).HI THEN
+			                dvm
+		                      ELSE dvm/[1+limited[dts*vimbc(ix,iy,iz,0)]]) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=vimbc(ix,iy,*,0).LO TO nz-1
+  		heady=~+dvm/dts 
+#endif
+#else	
+#ifdef WALLS			
+  		DO var(ix,iy,iz).u=~+(IF iz>uimbc(ix,iy).HI AND iz<Uuimbc(ix,iy).LO THEN
+			                 dum
+		                      ELSE IF iz<=uimbc(ix,iy).HI THEN dum/[1+limited[dts*uimbc(ix,iy,iz)]]
+		                      ELSE dum/[1+limited[dts*Uuimbc(ix,iy,iz)]] ) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=uimbc(ix,iy).LO TO Uuimbc(ix,iy).HI
+  		headx=~+dum/dts
+  		DO var(ix,iy,iz).v=~+(IF iz>vimbc(ix,iy).HI AND iz<Uvimbc(ix,iy).LO THEN
+			                dvm
+		                      ELSE IF iz<=vimbc(ix,iy).HI THEN dvm/[1+limited[dts*vimbc(ix,iy,iz)]]
+		                      ELSE dvm/[1+limited[dts*Uvimbc(ix,iy,iz)]] ) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=vimbc(ix,iy).LO TO Uvimbc(ix,iy).HI
+  		heady=~+dvm/dts
+#else
+  		DO var(ix,iy,iz).u=~+(IF iz>uimbc(ix,iy).HI THEN
+			                dum
+		                      ELSE dum/[1+limited[dts*uimbc(ix,iy,iz)]]) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=uimbc(ix,iy).LO TO nz-1
+  		headx=~+dum/dts
+  		DO var(ix,iy,iz).v=~+(IF iz>vimbc(ix,iy).HI THEN
+			                dvm
+		                      ELSE dvm/[1+limited[dts*vimbc(ix,iy,iz)]]) 
+		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=vimbc(ix,iy).LO TO nz-1
+  		heady=~+dvm/dts 
+#endif
+#endif  			
+  		
+#endif
+END timestep

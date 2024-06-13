@@ -18,7 +18,7 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
     ax.set_ylabel('x')
     ax.set_zlabel('y')
 
-    ax.w_zaxis.line.set_lw(0.)
+    #ax.w_zaxis.line.set_lw(0.)
     ax.set_zticks([])
 
     #ax.set_axis_off()
@@ -56,7 +56,7 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
         #             linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1)
         ax.plot_trisurf([Z_A, Z_B, Z_C], [X_A, X_B, X_C],
                 [Y_A, Y_B, Y_C], cmap="viridis",
-                    linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1)
+                    linewidth=0, antialiased=False, vmin=(1-k_value)*0.261313, vmax=(1+k_value)*0.261313)
     
     offset = n_P - 6*2*(nz+nx+2) - 2*2*(nz+nx)
     for i in range(6*2*(nz+nx+2) + 2*2*(nz+nx)):
@@ -139,7 +139,7 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
 
         ax.plot_trisurf([Z_A, Z_B, Z_C], [X_A, X_B, X_C],
                 [Y_A, Y_B, Y_C], cmap="viridis",
-                    linewidth=0, antialiased=False, vmin=(1-k_value)*0.1, vmax=(1+k_value)*0.1)
+                    linewidth=0, antialiased=False, vmin=(1-k_value)*0.261313, vmax=(1+k_value)*0.261313)
 
     # for i in range(n_N):
     #     if i < (n_N-n_G)//2 or i >= (n_N-n_G):

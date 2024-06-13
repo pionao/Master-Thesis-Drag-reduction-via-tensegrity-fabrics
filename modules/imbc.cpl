@@ -1,0 +1,166 @@
+USE grid			
+USE dns
+!USE poiseuille
+!USE peristalsis
+USE riblets
+USE coco
+USE tensegrity
+
+!USE rtchecks ! vediamo
+
+
+		
+SUBROUTINE allocate(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; DYNAMIC POINTER geometry) FOLLOWS
+SUBROUTINE Uallocate(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; DYNAMIC POINTER geometry) FOLLOWS
+REAL FUNCTION calcCoeff(GRID grid; GRID prGrid; DNS dns; DYNAMIC POINTER geometry; INTEGER VARIABLE ix, iy, iz) FOLLOWS
+REAL FUNCTION UcalcCoeff(GRID grid; GRID prGrid; DNS dns; DYNAMIC POINTER geometry; INTEGER VARIABLE ix, iy, iz) FOLLOWS
+SUBROUTINE populateCoeff(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; GRID prGrid; DYNAMIC POINTER geometry) FOLLOWS
+SUBROUTINE UpopulateCoeff(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; GRID prGrid; DYNAMIC POINTER geometry) FOLLOWS
+
+MODULE imbc
+
+	dir        = (     99,       0,        0,       1,        1,        2,       2 )
+	neighbours = ( (0,0,0), (-1,0,0), (1,0,0), (0,-1,0), (0,1,0), (0,0,-1), (0,0,1) )
+	
+
+	SUBROUTINE allocate(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; DYNAMIC POINTER geometry)
+        	!this.imbc = NEW ARRAY(dns.localSize(0,0)..dns.localSize(0,1), dns.localSize(1,0)..dns.localSize(1,1)) OF POINTER TO ARRAY(*) OF REAL
+		LOOP FOR ix=this.LO1 TO this.HI1 AND iy=this.LO2 TO this.HI2 
+			INTEGER izlo=0
+			DO
+				INC izlo
+				ARRAY(0..2) OF REAL coord = (grid.x(0,ix), grid.x(1,iy), grid.x(2,izlo))	 
+			WHILE isInBody[geometry, coord]
+			INTEGER izhi = izlo
+			LOOP FOR iz = izlo+1 TO dns.size(2)-1-grid.di(2)
+				BOOLEAN moleculeCutsBody = FALSE
+				ARRAY(0..2) OF INTEGER indxA = (ix,iy,iz) 
+				ARRAY(0..2) OF REAL coordA = (grid.x(0,indxA(0)), grid.x(1,indxA(1)), grid.x(2,indxA(2)))
+				LOOP FOR iN = neighbours.LO1 TO neighbours.HI1
+					ARRAY(0..2) OF INTEGER indxB = (ix,iy,iz) + neighbours(iN,*)
+					ARRAY(0..2) OF REAL coordB = (grid.x(0,indxB(0)), grid.x(1,indxB(1)), grid.x(2,indxB(2)))
+					IF geometry IS RIBLETS THEN
+					cordMod(geometry, coordA, coordB)
+					END IF
+					moleculeCutsBody = moleculeCutsBody OR isInBody[geometry, coordB]
+				REPEAT
+				IF moleculeCutsBody THEN izhi=iz
+				IF geometry IS RIBLETS THEN
+				   EDGE edgeCoord; findEdge(geometry, dns, coordA, edgeCoord)
+				   IF moleculeCutsBody OR applyCoco(coordA, edgeCoord, grid, dns, geometry) THEN izhi=iz
+				END IF
+			REPEAT
+			IF izlo # this(ix,iy).LO OR izhi # this(ix,iy).HI THEN
+			   FREE this(ix,iy)  
+			   this(ix,iy) = NEW ARRAY(izlo..izhi) OF REAL
+			END IF                   
+		REPEAT		
+	END allocate
+	
+	SUBROUTINE Uallocate(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; DYNAMIC POINTER geometry)
+        	!this.imbc = NEW ARRAY(dns.localSize(0,0)..dns.localSize(0,1), dns.localSize(1,0)..dns.localSize(1,1)) OF POINTER TO ARRAY(*) OF REAL
+		LOOP FOR ix=this.LO1 TO this.HI1 AND iy=this.LO2 TO this.HI2							   		
+		        INTEGER izhi=[IF grid.di(2)=1 THEN dns.size(2)-1 ELSE dns.size(2)]
+			DO
+				DEC izhi
+				ARRAY(0..2) OF REAL coord = (grid.x(0,ix), grid.x(1,iy), grid.x(2,izhi))
+			WHILE UisInBody[geometry, coord]
+			INTEGER izlo = izhi
+			LOOP FOR iz =izhi-1 DOWN TO 0+1+grid.di(2)
+				BOOLEAN moleculeCutsBody = FALSE
+				ARRAY(0..2) OF INTEGER indxA = (ix,iy,iz) 
+				ARRAY(0..2) OF REAL coordA = (grid.x(0,indxA(0)), grid.x(1,indxA(1)), grid.x(2,indxA(2)))
+				LOOP FOR iN = neighbours.LO1 TO neighbours.HI1
+					ARRAY(0..2) OF INTEGER indxB = (ix,iy,iz) + neighbours(iN,*)
+					ARRAY(0..2) OF REAL coordB = (grid.x(0,indxB(0)), grid.x(1,indxB(1)), grid.x(2,indxB(2)))
+					IF geometry IS RIBLETS THEN
+					cordMod(geometry, coordA, coordB)
+					END IF
+					moleculeCutsBody = moleculeCutsBody OR UisInBody[geometry, coordB]
+				REPEAT
+				IF moleculeCutsBody THEN izlo=iz
+				IF geometry IS RIBLETS THEN
+				   EDGE edgeCoord; findEdge(geometry, dns, coordA, edgeCoord)
+				   IF moleculeCutsBody OR applyCoco(coordA, edgeCoord, grid, dns, geometry) THEN izlo=iz
+				END IF			   
+			REPEAT
+			IF izlo # this(ix,iy).LO OR izhi # this(ix,iy).HI THEN
+			   FREE this(ix,iy)  
+			   this(ix,iy) = NEW ARRAY(izlo..izhi) OF REAL
+			END IF                   
+		REPEAT	
+	END Uallocate
+	
+		
+	REAL FUNCTION calcCoeff(GRID grid; GRID prGrid; DNS dns; DYNAMIC POINTER geometry; INTEGER VARIABLE ix, iy, iz)
+	        RESULT=0
+		! Coordinates of central point
+	        ARRAY(0..2) OF INTEGER indx_in = (ix, iy, iz)						
+		ARRAY(0..2) OF REAL coord_in = (grid.x(0, indx_in(0)), grid.x(1, indx_in(1)), grid.x(2, indx_in(2)))
+		! Helper functions for distances 
+	        INLINE REAL FUNCTION delta(INTEGER iN) = grid.delta(dir(iN),indx_in(dir(iN)),SIGN(neighbours(iN,dir(iN)+1)))
+		INLINE REAL FUNCTION d2(INTEGER iN) = grid.d2(dir(iN),indx_in(dir(iN)),SIGN(neighbours(iN,dir(iN)+1)))
+		! If geometry is riblet, prepare coco 
+                IF geometry IS RIBLETS THEN  prepareCoco(grid, prGrid, dns, geometry, coord_in, indx_in)
+                ! Loop across all arms of the computational molecule
+		LOOP FOR iN = neighbours.LO1+1 TO neighbours.HI1					
+			ARRAY(0..2) OF INTEGER indx = (ix,iy,iz) + neighbours(iN,*)
+			ARRAY(0..2) OF REAL coord = (grid.x(0,indx(0)), grid.x(1,indx(1)), grid.x(2,indx(2)))
+			IF geometry IS RIBLETS THEN
+			cordMod(geometry, coord_in, coord)
+			END IF
+			REAL d0 = ABS(coord-coord_in)
+			REAL d = d0
+			IF isInBody(geometry,coord) THEN d = ABS(coord_in-Bisection(<isInBody(geometry,s)>,coord_in,coord))
+                       REAL coeff = delta(iN)/d*d2(iN) 
+                       IF geometry IS RIBLETS THEN imposeCoco(coeff, d, d0, d2(iN), geometry, dns, coord, coord_in)
+                       RESULT = ~ + coeff
+		REPEAT			
+        	RESULT = {~ - [SUM grid.d2(iC,indx_in(iC),i) FOR ALL iC,i]}*dns.nu			! Add -2/dx/dx -2/dy/dy -2/dz/dz
+	END calcCoeff
+
+	REAL FUNCTION UcalcCoeff(GRID grid; GRID prGrid; DNS dns; DYNAMIC POINTER geometry; INTEGER VARIABLE ix, iy, iz)
+	        RESULT=0
+		! Coordinates of central point
+	        ARRAY(0..2) OF INTEGER indx_in = (ix, iy, iz)						
+		ARRAY(0..2) OF REAL coord_in = (grid.x(0, indx_in(0)), grid.x(1, indx_in(1)), grid.x(2, indx_in(2)))
+		! Helper functions for distances 
+	        INLINE REAL FUNCTION delta(INTEGER iN) = grid.delta(dir(iN),indx_in(dir(iN)),SIGN(neighbours(iN,dir(iN)+1)))
+		INLINE REAL FUNCTION d2(INTEGER iN) = grid.d2(dir(iN),indx_in(dir(iN)),SIGN(neighbours(iN,dir(iN)+1)))
+		! If geometry is riblet, prepare coco 
+                IF geometry IS RIBLETS THEN  prepareCoco(grid, prGrid, dns, geometry, coord_in, indx_in)
+                ! Loop across all arms of the computational molecule
+		LOOP FOR iN = neighbours.LO1+1 TO neighbours.HI1					
+			ARRAY(0..2) OF INTEGER indx = (ix,iy,iz) + neighbours(iN,*)
+			ARRAY(0..2) OF REAL coord = (grid.x(0,indx(0)), grid.x(1,indx(1)), grid.x(2,indx(2)))
+			IF geometry IS RIBLETS THEN
+			cordMod(geometry, coord_in, coord)
+			END IF
+			REAL d0 = ABS(coord-coord_in)
+			REAL d = d0
+			IF UisInBody(geometry,coord) THEN d = ABS(coord_in-Bisection(<UisInBody(geometry,s)>,coord_in,coord))
+                       REAL coeff = delta(iN)/d*d2(iN) 
+                       IF geometry IS RIBLETS THEN imposeCoco(coeff, d, d0, d2(iN), geometry, dns, coord, coord_in)
+                       RESULT = ~ + coeff
+		REPEAT			
+        	RESULT = {~ - [SUM grid.d2(iC,indx_in(iC),i) FOR ALL iC,i]}*dns.nu			! Add -2/dx/dx -2/dy/dy -2/dz/dz
+	END UcalcCoeff
+		
+	SUBROUTINE populateCoeff(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; GRID prGrid; DYNAMIC POINTER geometry) 
+		LOOP FOR ix=this.LO1 TO this.HI1 AND iy=this.LO2 TO this.HI2
+			LOOP FOR iz = this(ix, iy).LO TO this(ix, iy).HI
+				this(ix, iy)(iz) = calcCoeff(grid, prGrid, dns, geometry, ix, iy, iz)
+				IF this(ix, iy)(iz) <-1E2 THEN this(ix,iy)(iz)=-1E2
+			REPEAT
+	        REPEAT	      
+	END populateCoeff
+
+	SUBROUTINE UpopulateCoeff(ARRAY(*,*) OF POINTER TO ARRAY(*) OF REAL this^; DNS dns; GRID grid; GRID prGrid; DYNAMIC POINTER geometry) 
+		LOOP FOR ix=this.LO1 TO this.HI1 AND iy=this.LO2 TO this.HI2
+			LOOP FOR iz = this(ix, iy).LO TO this(ix, iy).HI
+				this(ix, iy)(iz) = UcalcCoeff(grid, prGrid, dns, geometry, ix, iy, iz)
+				IF this(ix, iy)(iz) <-1E2 THEN this(ix,iy)(iz)=-1E2
+			REPEAT
+	        REPEAT		        
+	END UpopulateCoeff			
+END imbc

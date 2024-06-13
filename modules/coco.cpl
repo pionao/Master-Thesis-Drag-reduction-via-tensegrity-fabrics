@@ -1,0 +1,100 @@
+USE grid
+USE riblets
+USE dns
+USE complex
+USE analyticalStokesSolution
+
+BOOLEAN FUNCTION applyCoco(ARRAY(*) OF REAL coord; EDGE eCoord; GRID grid; DNS dns; POINTER TO RIBLETS riblet) FOLLOWS
+ARRAY(0..1) OF REAL FUNCTION signP(RIBLETS riblet; ARRAY(*) OF REAL coord, coord_p1, coord_p2; ARRAY(*) OF REAL eCoord; REAL p1, p2) FOLLOWS
+SUBROUTINE prepareCoco(GRID grid; GRID prGrid; DNS dns; RIBLETS riblet^; ARRAY(*) OF REAL coord_in; ARRAY(*) OF INTEGER indx_in) FOLLOWS
+SUBROUTINE imposeCoco(REAL coef^, d, d0, d2; RIBLETS riblet^; DNS dns; ARRAY(*) OF REAL coord, coord_in) FOLLOWS
+
+MODULE coco
+
+	BOOLEAN FUNCTION applyCoco(ARRAY(*) OF REAL coord; EDGE eCoord; GRID grid; DNS dns; POINTER TO RIBLETS riblet)
+                INTEGER iN0	
+                LOOP FOR ALL ii
+                   IF grid.di(ii) # 0 THEN  iN0 = ii								       ! To find the equation we are computing the coefficients for
+                REPEAT
+                RESULT = NO
+                R2 = (coord(0+LO)-eCoord(0))^2 + (coord(1+LO) - eCoord(1))^2 + (coord(2+LO) - eCoord(2))^2
+                IF riblet.useCoco AND R2<=riblet.r^2 THEN
+                      RESULT = YES
+                      IF iN0=2 AND (ABS(coord(LO+1)-eCoord(LO+1))<1E-5 OR coord(LO+2)-eCoord(LO+2)>0.3*dns.nu) THEN    ! To avoid having wimbc=inf when points lie above riblet tip
+                         RESULT = NO
+                      END IF
+	              IF iN0=1 AND stokesSolution(dns,riblet,coord).u<0 AND SUM(riblet.amp)>0 THEN		       ! To account for incorrect b.c. coming from Luchini correction for small riblets
+	                    RESULT = NO
+	              END IF
+	              IF iN0=0 AND stokesSolution(dns,riblet,coord).u<0 THEN					       ! To account for incorrect b.c. coming from Luchini correction for small riblets
+                               RESULT = NO
+                      END IF
+                END IF
+	END applyCoco
+	
+	ARRAY(0..1) OF REAL FUNCTION signP(RIBLETS riblet; ARRAY(*) OF REAL coord, coord_p1, coord_p2; ARRAY(*) OF REAL eCoord; REAL p1, p2)
+		! Function needed to change the sign of p1 and p2 when computing deltaP, to account for the non periodicity of pressure Stokes solution
+		IF coord(1)-eCoord(1) < 0 THEN
+			IF SIGN(p1)#SIGN(p2) AND ribletsCrossed(riblet,coord_p1)=ribletsCrossed(riblet,coord_p2) THEN
+				RESULT = (-1, -1)
+			ELSE
+				RESULT = (1, -1)
+			END IF
+		ELSE
+			IF SIGN(p1)#SIGN(p2) AND ribletsCrossed(riblet,coord_p1)=ribletsCrossed(riblet,coord_p2) AND ABS(p1)>1E-3 THEN
+				RESULT = (1, 1)
+			ELSE
+				RESULT = (1, -1)
+			END IF
+		END IF
+	END signP
+	
+	
+	COCO = STRUCTURE[BOOLEAN applyCoco; 
+                         ARRAY(0..2) OF REAL Lweight, Sweight, pSweight;
+                         REAL laplaceSol0, stokesSol0, pGrad0;
+                         INTEGER iEq]
+        COCO coco
+	
+	SUBROUTINE prepareCoco(GRID grid; GRID prGrid; DNS dns; RIBLETS riblet^; ARRAY(*) OF REAL coord_in; ARRAY(*) OF INTEGER indx_in)
+	        coco = 0
+		LOOP FOR ALL ii
+			IF grid.di(ii) # 0 THEN  coco.iEq = ii						! To find the equation we are computing the coefficients for
+		REPEAT
+		ARRAY(0..2) OF REAL coord_p1 = (prGrid.x(0, indx_in(0)), prGrid.x(1, indx_in(1)), prGrid.x(2, indx_in(2)))
+		ARRAY(0..2) OF REAL coord_p2 = (prGrid.x(0, indx_in(0)+grid.di(0)), prGrid.x(1, indx_in(1)+grid.di(1)), prGrid.x(2, indx_in(2)+grid.di(2)))
+		cordMod(riblet, coord_in, coord_p1); cordMod(riblet, coord_in, coord_p2)
+		prGridDelta = ABS(coord_p2-coord_p1)
+		
+		EDGE edgeCoord; findEdge(riblet, dns, coord_in, edgeCoord)
+		coco.Lweight = (COS(edgeCoord(3))**2, SIN(edgeCoord(3))**2, 0)		! Rotation coefficients
+		coco.Sweight = (SIN(edgeCoord(3))**2, COS(edgeCoord(3))**2, 1)		! "
+		coco.pSweight = (SIN(edgeCoord(3)), COS(edgeCoord(3)), 1) 		! "
+		
+		coco.applyCoco =  applyCoco(coord_in, edgeCoord, grid, dns, riblet)
+		IF coco.applyCoco THEN                                              			! Pressure contribution to Coco
+		        coco.laplaceSol0 = stokesSolution(dns, riblet, coord_in)(0) 				! Laplace solution @ central point
+		        coco.stokesSol0 = stokesSolution(dns, riblet, coord_in)(IF coco.iEq#2 THEN 1 ELSE coco.iEq)	! Stokes solution @ central point
+			p1 = stokesSolution(dns, riblet, coord_p1)(3)
+			p2 = stokesSolution(dns, riblet, coord_p2)(3)
+			symmetry = stokesSolution(dns, riblet, coord_in)(4)				! To account for periodic bc (for w)
+			ARRAY(0..1) OF REAL Psigns = signP(riblet, coord_in, coord_p1, coord_p2, edgeCoord, p1, p2)
+			coco.pGrad0 = coco.pSweight(coco.iEq)*(Psigns(0)*p1+Psigns(1)*p2)/coco.stokesSol0/prGridDelta * (IF coco.iEq=2 THEN symmetry ELSE 1)
+		END IF
+        END prepareCoco 
+	
+	SUBROUTINE imposeCoco(REAL coef^, d, d0, d2; RIBLETS riblet^; DNS dns; ARRAY(*) OF REAL coord, coord_in)
+		IF coco.applyCoco THEN										! Points with Coco
+			IF ABS(ribletsCrossed(riblet, coord) - ribletsCrossed(riblet, coord_in)) = 1 AND coco.iEq = 2 THEN ! when w stencil intersects with riblets symmetry axis
+				coef = 0
+			ELSE IF d = d0 THEN
+				corrLapl = stokesSolution(dns, riblet, coord)(0)/coco.laplaceSol0*d2
+				corrStokes = ABS(stokesSolution(dns, riblet, coord)(IF coco.iEq#2 THEN 1 ELSE coco.iEq)/coco.stokesSol0*d2)
+				coef = coco.pGrad0 + coco.Lweight(coco.iEq)*corrLapl + coco.Sweight(coco.iEq)*corrStokes
+			ELSE									                 ! Stencil crosses the boundary
+				coef = 0    ! XXX TODO Do this case happen at all???
+			END IF
+		END IF 	
+	END imposeCoco
+	
+END coco

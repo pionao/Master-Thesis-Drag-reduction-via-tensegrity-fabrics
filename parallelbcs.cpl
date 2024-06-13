@@ -1,0 +1,134 @@
+! note: this module must be USEd after all other SHARED declarations
+! INCLUDE parallelbcs.h at the beginning
+!INCLUDE parallelbcs.h
+MODULE parupdate
+STRUCTURE[INTEGER direction; POINTER TO ARRAY(*,*) OF REAL xl,xl1,xh,xh1,yl,yl1,yh,yh1] comm
+
+SUBROUTINE reader()
+    nreqs=0
+    IF comm.direction>=0 THEN
+      !IF prevx<=0 THEN comm.xl(*)=comm.xh1(*) ELSE
+        MPI_Recv(comm.xl(*),prevx, 1, nreqs); INC nreqs
+      !END IF
+    END IF
+    IF comm.direction<=0 THEN
+      !IF nextx<=0 THEN comm.xh(*)=comm.xl1(*) ELSE
+        MPI_Recv(comm.xh(*),nextx, 2, nreqs); INC nreqs
+      !END IF
+    END IF
+    IF comm.direction>=0 THEN
+      !IF prevy<=0 THEN comm.yl(*)=comm.yh1(*) ELSE
+        MPI_Recv(comm.yl(*),prevy, 3, nreqs); INC nreqs
+      !END IF
+    END IF
+    IF comm.direction<=0 THEN
+      !IF nexty<=0 THEN comm.yh(*)=comm.yl1(*) ELSE
+        MPI_Recv(comm.yh(*),nexty, 4, nreqs); INC nreqs
+      !END IF
+    END IF
+END reader
+
+SUBROUTINE writer()
+    nsreqs=0  
+    ! invia in x
+    IF comm.direction>=0  THEN
+       MPI_Send(comm.xh1(*), nextx, 1, nsreqs); INC nsreqs
+    END IF
+    IF comm.direction<=0  THEN
+       MPI_Send(comm.xl1(*), prevx, 2, nsreqs); INC nsreqs
+    END IF
+    ! controlla di aver ricevuto in x prima di mandare 
+    INTEGER nR=[IF comm.direction=0 THEN 1 ELSE 0]
+    MODULE 
+    <* MPI_Waitall(nR_+1, request, MPI_STATUSES_IGNORE); *>
+    END MODULE
+    LOOP FOR iR=0 TO nR
+        LOOP FOR i=unpckbuf(iR).LO1 TO unpckbuf(iR).HI1 AND j=unpckbuf(iR).LO2 TO unpckbuf(iR).HI2  
+           unpckbuf(iR)(i,j)=recvbuf(iR)((i-unpckbuf(iR).LO1)*(unpckbuf(iR).HI2-unpckbuf(iR).LO2+1)+j-unpckbuf(iR).LO2) 
+        REPEAT
+    REPEAT
+    ! invia in y
+    IF comm.direction>=0  THEN
+       MPI_Send(comm.yh1(*), nexty, 3, nsreqs); INC nsreqs
+    END IF
+    IF comm.direction<=0  THEN
+       MPI_Send(comm.yl1(*), prevy, 4, nsreqs); INC nsreqs
+    END IF
+END writer
+
+SUBROUTINE com
+    reader()
+    writer()
+END com
+
+SUBROUTINE pbcwait() 
+    INTEGER nR=[IF comm.direction=0 THEN 1 ELSE 0]
+    MODULE
+    <*
+      MPI_Waitall(nR_+1, &request[1+nR_], MPI_STATUSES_IGNORE);
+      MPI_Waitall(nsreqs_, srequest, MPI_STATUSES_IGNORE);
+    *>
+    END MODULE
+    LOOP FOR iR=1+nR TO 1+2*nR
+        LOOP FOR i=unpckbuf(iR).LO1 TO unpckbuf(iR).HI1 AND j=unpckbuf(iR).LO2 TO unpckbuf(iR).HI2  
+           unpckbuf(iR)(i,j)=recvbuf(iR)((i-unpckbuf(iR).LO1)*(unpckbuf(iR).HI2-unpckbuf(iR).LO2+1)+j-unpckbuf(iR).LO2) 
+        REPEAT
+    REPEAT
+END pbcwait 
+
+SUBROUTINE pbc(ARRAY(*,*,*) OF REAL f^)
+  comm.direction=0
+  comm.xl=^f(LO); comm.xh1=^f(HI-1); comm.yl=^f(*,LO); comm.yh1=^f(*,HI-1)
+  comm.xl1=^f(LO+1); comm.xh=^f(HI); comm.yl1=^f(*,LO+1); comm.yh=^f(*,HI)
+  com()
+END pbc
+
+SUBROUTINE pbc(ARRAY(*,*,*) OF REAL u^, v^; INTEGER dir)
+  comm.direction=dir
+  IF dir>=0 THEN comm.xl=^u(LO); comm.xh1=^u(HI-1); comm.yl=^v(*,LO); comm.yh1=^v(*,HI-1)
+  IF dir<=0 THEN comm.xl1=^u(LO+1); comm.xh=^u(HI); comm.yl1=^v(*,LO+1); comm.yh=^v(*,HI)
+  com()
+END pbc
+
+SUBROUTINE pbcp(ARRAY(*,*,*) OF REAL u^,v^; INTEGER parity)
+  comm.direction=0
+  comm.xl=^u(LO,u.LO2+(u.LO2+u.LO1+1+parity) MOD 2 +2*(*),*)
+  comm.xh1=^u(HI-1,u.LO2+(u.LO2+u.HI1+parity) MOD 2 +2*(*),*)
+  comm.xh=^u(HI,u.LO2+(u.LO2+u.HI1+parity) MOD 2 +2*(*),*)
+  comm.xl1=^u(LO+1,u.LO2+(u.LO2+u.LO1+1+parity) MOD 2 +2*(*),*)
+  comm.yl=^v(v.LO1+(v.LO1+v.LO2+1+parity) MOD 2 +2*(*),LO,*)
+  comm.yh1=^v(v.LO1+(v.LO1+v.HI2+parity) MOD 2 +2*(*),HI-1,*)
+  comm.yh=^v(v.LO1+(v.LO1+v.HI2+parity) MOD 2 +2*(*),HI,*)
+  comm.yl1=^v(v.LO1+(v.LO1+v.LO2+1+parity) MOD 2 +2*(*),LO+1,*)
+  com()
+END pbcp
+END parupdate
+
+SUBROUTINE getmax(ARRAY(*) OF REAL val^)
+    <*
+    MPI_Allreduce(MPI_IN_PLACE, (double *) val__, val_h-val_l+1,
+                  MPI_DOUBLE, MPI_MAX, cart_comm);
+    *>
+END getmax
+
+
+SUBROUTINE accumulate(ARRAY(*) OF REAL val^)
+    <*
+    MPI_Allreduce(MPI_IN_PLACE, (double *) val__, val_h-val_l+1,
+                  MPI_DOUBLE, MPI_SUM, cart_comm);
+    *>
+END accumulate
+
+SUBROUTINE accumulateX(ARRAY(*) OF REAL valin^, valout^)
+    <*
+    MPI_Allreduce((double *) valin__, (double *) valout__, valin_h-valin_l+1,
+                  MPI_DOUBLE, MPI_SUM, cart_comm_x);
+    *>
+END accumulateX
+
+SUBROUTINE accumulateY(ARRAY(*) OF REAL valin^, valout^)
+    <*
+    MPI_Allreduce((double *) valin__, (double *) valout__, valin_h-valin_l+1,
+              MPI_DOUBLE, MPI_SUM, cart_comm_y);
+    *>
+END accumulateY

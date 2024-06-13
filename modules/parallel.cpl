@@ -1,0 +1,70 @@
+!#includedir "/home/lorenzo/Programmi/openmpi/openmpi-5.0.3/installation/include"
+#includedir "/usr/lib/x86_64-linux-gnu/openmpi/include/"
+#include <mpi.h>
+#link "-lmpi"
+#include <fenv.h>
+USE dns
+
+#ifdef dns
+#pragma message "Compiling for the DNS code!"
+#else
+#pragma message  "Compiling standalone!"
+#endif
+
+! In this module, encapsulation through data STRUCTURE is not performed,
+! since it is not compatible with the current readily-available MPI routines.
+! To change this, write own C SECTION for MPI calls. 
+
+#ifndef dns
+MPI_Init(argc,argv) 
+INTEGER iproc,nproc,iprocx,nprocx,iprocy,nprocy
+MPI_Comm_size(MPI_COMM_WORLD, nproc)
+MPI_Comm_rank(MPI_COMM_WORLD, iproc) 
+nprocx=atoi(COMMANDLINE(1))
+nprocy=atoi(COMMANDLINE(2))     
+BOOLEAN has_terminal = (iproc=0)
+#endif
+
+SUBROUTINE mpiInit(DNS dns^) FOLLOWS
+
+MODULE parallel
+
+!#ifndef dns
+	INLINE INTEGER FUNCTION nxl(INTEGER n,i)=FLOOR[(i-1)*n/nprocx]+1
+	INLINE INTEGER FUNCTION nxh(INTEGER n,i)=FLOOR[i*n/nprocx]
+	INLINE INTEGER FUNCTION nyl(INTEGER n,i)=FLOOR[(i-1)*n/nprocy]+1
+	INLINE INTEGER FUNCTION nyh(INTEGER n,i)=FLOOR[i*n/nprocy]
+!#endif
+
+	SUBROUTINE mpiInit(DNS dns^)
+#ifndef dns  
+                	IF nprocx*nprocy#nproc THEN ERROR "Domain decompositon not consistent with number of processors!"
+                        iprocx=(iproc DIV nprocy)+1
+                        iprocy=(iproc MOD nprocy)+1
+#endif
+                        dns.localSize(0,0) = nxl(dns.size(0), iprocx)-1; dns.localSize(1,0) = nyl(dns.size(1), iprocy)-1
+                        dns.localSize(0,1) = nxh(dns.size(0), iprocx)+1; dns.localSize(1,1) = nyh(dns.size(1), iprocy)+1
+                        dns.localSize(2,0) = 1; dns.localSize(2,1)=dns.size(2)-1
+                        IF has_terminal THEN 
+                          WRITE " MPI params:"
+                          WRITE "             ", "iproc", "nproc", "iprocx", "nprocx", "iprocy", "nprocy", "localSize.x", "", "localSize.y" 
+                          FLUSH(stdout)
+                        END IF
+                        MPI_Barrier(MPI_COMM_WORLD)
+#ifdef dns
+                        LOOP FOR i=1 TO nproc
+#else
+			LOOP FOR i=0 TO nproc-1
+#endif
+                            IF i = iproc THEN
+				WRITE " ", " ", iproc, nproc, iprocx, nprocx, iprocy, nprocy, dns.localSize(0), dns.localSize(1)
+                                FLUSH(stdout)
+                            END IF
+                            MPI_Barrier(MPI_COMM_WORLD)
+                        REPEAT 
+        END mpiInit
+
+
+END parallel
+
+atexit(MPI_Finalize)

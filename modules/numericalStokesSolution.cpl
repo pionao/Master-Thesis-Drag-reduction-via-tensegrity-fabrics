@@ -1,0 +1,105 @@
+USE grid
+USE dns
+USE riblets
+
+NUMSOL  = STRUCTURE[ POINTER TO ARRAY(*,*) OF REAL uLapl, vStokes, wStokes, pStokes;
+                     POINTER TO ARRAY(*) OF REAL yGrid, zGrid;
+                     REAL dy, dz;
+                     STRING uLaplF, vStokesF, wStokesF, pStokesF, yGridF, zGridF]
+NUMSOL sol
+
+STKSOL = STRUCTURED ARRAY(u,v,w,p,symmetry) OF REAL
+                  
+SUBROUTINE readFiles(NUMSOL this^) FOLLOWS
+STRUCTURED ARRAY(N, S, W, E) OF INTEGER FUNCTION neighboursIndex(NUMSOL this^; ARRAY(*) OF REAL coord; RIBLETS riblet) FOLLOWS
+STRUCTURED ARRAY(N, S, W, E) OF ARRAY(1..2) OF REAL FUNCTION computeNeighbours(NUMSOL this^; ARRAY(*) OF REAL coord; RIBLETS riblet) FOLLOWS
+STKSOL FUNCTION stokesSolution(DNS dns; POINTER TO RIBLETS riblet; ARRAY(*) OF REAL coord) FOLLOWS
+
+MODULE numerical
+	nElements = 2000 ! These are the points used to acquire data, has to be the same as the one used in python
+	
+	sol.uLaplF=WRITE("./finiteElements/meshToUse/u_laplace.bin")
+	sol.vStokesF=WRITE("./finiteElements/meshToUse/v_stokes.bin")
+	sol.wStokesF=WRITE("./finiteElements/meshToUse/w_stokes.bin")
+	sol.pStokesF=WRITE("./finiteElements/meshToUse/p_stokes.bin")
+	sol.yGridF=WRITE("./finiteElements/meshToUse/gridy.bin")
+	sol.zGridF=WRITE("./finiteElements/meshToUse/gridz.bin")
+	
+	SUBROUTINE readFiles(NUMSOL this^)
+		uLapl = NEW ARRAY(0..nElements-1,0..nElements-1) OF REAL 
+		vStokes = NEW ARRAY(0..nElements-1,0..nElements-1) OF REAL 
+		wStokes = NEW ARRAY(0..nElements-1,0..nElements-1) OF REAL 
+		pStokes = NEW ARRAY(0..nElements-1,0..nElements-1) OF REAL 
+		yGrid = NEW ARRAY(0..nElements-1) OF REAL 
+		zGrid = NEW ARRAY(0..nElements-1) OF REAL 
+		
+		FILE uLaplFile = OPENRO(this.uLaplF)
+		FILE vStokesFile = OPENRO(this.vStokesF)
+		FILE wStokesFile = OPENRO(this.wStokesF)
+		FILE pStokesFile = OPENRO(this.pStokesF)
+		FILE yGridFile = OPENRO(this.yGridF)
+		FILE zGridFile = OPENRO(this.zGridF)
+		
+		READ BINARY FROM uLaplFile uLapl
+		READ BINARY FROM vStokesFile vStokes
+		READ BINARY FROM wStokesFile wStokes
+		READ BINARY FROM pStokesFile pStokes
+		READ BINARY FROM yGridFile yGrid
+		READ BINARY FROM zGridFile zGrid
+		
+		this.uLapl = uLapl
+		this.vStokes = vStokes
+		this.wStokes = wStokes
+		this.pStokes = pStokes
+		this.yGrid = yGrid
+		this.zGrid = zGrid
+		this.dy = this.yGrid(HI)-this.yGrid(HI-1)
+		this.dz = this.zGrid(HI)-this.zGrid(HI-1)
+	END readFiles
+	
+	neighbourIndxType = STRUCTURED ARRAY(N, S, W, E) OF INTEGER
+	
+	readFiles(NUMSOL sol)
+	
+	neighbourIndxType FUNCTION neighboursIndex(NUMSOL this^; ARRAY(*) OF REAL coord; RIBLETS riblet)
+	        ! this function returns, given a point with coordinates coord (in the global reference frame) 
+	        ! the indices of the point in the reference frame of the interpolated Stokes solution around the riblet tip. 
+	        ARRAY(0..2) OF REAL relCoord = coord
+	        relCoord(1) =  ~ - 0.5*riblet.s
+	        relCoord(1) =  ~ - ribletsCrossed(riblet, relCoord)*riblet.s + 0.5*riblet.s
+		RESULT.N = CEILING((relCoord(2+LO)-this.zGrid(LO))/this.dz)
+		RESULT.S = FLOOR((relCoord(2+LO)-this.zGrid(LO))/this.dz)
+		RESULT.E = CEILING((relCoord(1+LO)-this.yGrid(LO))/this.dy)
+		RESULT.W = FLOOR((relCoord(1+LO)-this.yGrid(LO))/this.dy)
+	END neighboursIndex
+	
+	neighbourCoordType = STRUCTURED ARRAY(N, S, W, E) OF ARRAY(1..2) OF REAL
+	
+	neighbourCoordType FUNCTION computeNeighbours(NUMSOL this^; ARRAY(*) OF REAL coord; RIBLETS riblet)
+		STRUCTURED ARRAY(N, S, W, E) OF INTEGER indx = neighboursIndex(this, coord, riblet)
+		RESULT(0,1) = this.yGrid(indx.W); RESULT(0,2) = this.zGrid(indx.S) ! SouthWest Neighour
+		RESULT(1,1) = this.yGrid(indx.E); RESULT(1,2) = this.zGrid(indx.S) ! SouthEast Neighbour
+		RESULT(2,1) = this.yGrid(indx.W); RESULT(2,2) = this.zGrid(indx.N) ! NorthWest Neighbour
+		RESULT(3,1) = this.yGrid(indx.E); RESULT(3,2) = this.zGrid(indx.N) ! SouthWest Neighbour
+	END computeNeighbours
+	
+	REAL FUNCTION linearInterpolation(ARRAY(*) OF REAL coord; ARRAY(*,*) OF REAL fun; neighbourIndxType nodeIndx; neighbourCoordType nodeCord)
+		fE =  fun(nodeIndx.E,nodeIndx.S) + (coord(2)-nodeCord.S(2))*[ (fun(nodeIndx.E,nodeIndx.N)-fun(nodeIndx.E,nodeIndx.S))/sol.dz ]
+		fW =  fun(nodeIndx.W,nodeIndx.S) + (coord(2)-nodeCord.S(2))*[ (fun(nodeIndx.W,nodeIndx.N)-fun(nodeIndx.W,nodeIndx.S))/sol.dz ]
+		RESULT  =  fW + (coord(1)-nodeCord.W(1))*[ (fE-fW)/sol.dy ]
+	END linearInterpolation
+	
+	STKSOL FUNCTION stokesSolution(DNS dns; POINTER TO RIBLETS riblet; ARRAY(*) OF REAL coord)
+	        ARRAY(0..2) OF REAL relCoord = coord
+	        relCoord(1) =  ~ - 0.5*riblet.s
+	        relCoord(1) =  ~ - ribletsCrossed(riblet, relCoord)*riblet.s + 0.5*riblet.s
+		neighbourIndxType nodeIndx = neighboursIndex(sol, coord, riblet)
+	        neighbourCoordType nodeCord = computeNeighbours(sol, coord, riblet)
+	        RESULT.u = linearInterpolation(relCoord, sol.uLapl, nodeIndx, nodeCord)
+	        RESULT.v = linearInterpolation(relCoord, sol.vStokes, nodeIndx, nodeCord)
+	        RESULT.w = linearInterpolation(relCoord, sol.wStokes, nodeIndx, nodeCord)
+	        RESULT.p = linearInterpolation(relCoord, sol.pStokes, nodeIndx, nodeCord)
+	        RESULT.symmetry = 1
+ 	END stokesSolution
+	
+END numerical

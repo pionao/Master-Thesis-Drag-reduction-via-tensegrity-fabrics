@@ -54,7 +54,7 @@ q_tilde = np.genfromtxt('./output/q_tilde.csv', delimiter=',')
 # Prova plot fabric
 
 fig = plt.figure()
-plot_tens(fig, q_tilde[:,0], X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes, nx, nz,
+plot_tens(fig, q_tilde[:,500], X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes, nx, nz,
            l_per)
 plt.show()
 

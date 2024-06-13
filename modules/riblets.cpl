@@ -1,0 +1,155 @@
+USE complex
+USE dns
+
+RIBLETS = STRUCTURE[ REAL h_s, s, h, stkexp, r, rTip, zCirc, yTan;
+		     INTEGER waven,extra; 
+		     POINTER TO ARRAY(*) OF REAL lambda, amp;
+		     ARRAY(0..6) OF REAL phiC, gC;
+		     BOOLEAN useCoco
+		   ]
+		   
+EDGE = STRUCTURED ARRAY(x,y,z,beta) OF REAL
+	
+SUBROUTINE readInputFile(RIBLETS this^; STRING fname) FOLLOWS
+REAL FUNCTION yWave(RIBLETS this; REAL x) FOLLOWS
+ARRAY(0..2) OF REAL FUNCTION Bisection(FUNCTION(ARRAY(0..2) OF REAL s)->BOOLEAN f; ARRAY(0..2) OF REAL x1, x2) FOLLOWS
+BOOLEAN FUNCTION isInBody(RIBLETS this^; ARRAY(*) OF REAL coordinates) FOLLOWS
+BOOLEAN FUNCTION UisInBody(RIBLETS this^; ARRAY(*) OF REAL coordinates) FOLLOWS
+STRUCTURED ARRAY(x, y, z) OF REAL FUNCTION edge(RIBLETS this; ARRAY(*) OF REAL coordinates) FOLLOWS
+SUBROUTINE findEdge(POINTER TO RIBLETS this; DNS dns; ARRAY(*) OF REAL coordinates; POINTER TO EDGE edgeCord) FOLLOWS
+SUBROUTINE cordMod(RIBLETS this^; ARRAY(*) OF REAL pA; POINTER TO ARRAY(*) OF REAL pB) FOLLOWS
+INTEGER FUNCTION ribletsCrossed(RIBLETS this; ARRAY(*) OF REAL coordinates) FOLLOWS
+
+MODULE riblets
+
+        ! Geometrical tolerance
+	tol = 1E-10
+
+
+	SUBROUTINE readInputFile(RIBLETS this^; STRING fname)
+		FILE ribletsin=OPENRO(fname)
+		INTEGER waven
+		REAL spacing, ratiohs
+		BOOLEAN use_coco
+		INTEGER extra
+		REAL radius, stokexp
+		REAL tip_radius, zCirc, yTan
+		ARRAY(0..6) OF REAL phiC, gC
+		INTEGER ph
+		READ BY NAME FROM ribletsin spacing, ratiohs
+		READ BY NAME FROM ribletsin waven
+		lambda = NEW ARRAY(1..waven) OF REAL 
+		ampl = NEW ARRAY(1..waven) OF REAL
+		READ BY NAME FROM ribletsin lambda
+		READ BY NAME FROM ribletsin ampl
+		READ BY NAME FROM ribletsin use_coco, radius, stokexp, extra
+		READ BY NAME FROM ribletsin phiC, gC
+		READ BY NAME FROM ribletsin tip_radius, zCirc, yTan
+		READ BY NAME FROM ribletsin ph
+		this.h_s = ratiohs
+		this.s = spacing
+		this.stkexp = stokexp
+		this.r = radius
+		this.h = this.h_s*this.s
+		this.waven = waven
+		this.lambda = lambda
+		this.amp = ampl
+		this.phiC = phiC
+		this.gC = gC
+		this.rTip = tip_radius
+		this.zCirc = zCirc
+		this.yTan = yTan
+		this.useCoco = use_coco
+		this.extra = extra
+	END readInputFile
+	
+	ARRAY(0..2) OF REAL FUNCTION Bisection(FUNCTION(ARRAY(0..2) OF REAL s)->BOOLEAN f; ARRAY(0..2) OF REAL x1, x2)
+		ARRAY(0..2) OF REAL xl = x1, xr = x2
+		fl = f(xl); fr = f(xr)
+		IF fl = fr THEN ERROR "Bisection point not included in bisection limits"
+		LOOP halve
+			RESULT = (xl+xr)/2
+			IF ABS(xl-xr)<tol THEN EXIT Bisection
+			IF f(RESULT) = fl THEN xl = RESULT ELSE xr = RESULT
+		REPEAT halve
+	END Bisection
+	
+        REAL FUNCTION yWave(RIBLETS this; REAL x)
+                ! This function gives the local shift at position x of the 
+                ! sinusoidal riblet crest
+		RESULT = [SUM this.amp(ii)*SIN(2*PI/this.lambda(ii)*x) FOR ii=1 TO this.waven]
+        END yWave
+
+	BOOLEAN FUNCTION isInBody(RIBLETS this^; ARRAY(*) OF REAL coordinates)
+		yNew = coordinates(1+LO) - yWave(this,coordinates(LO))
+		z_at_p = ABS(this.h_s*2*(yNew - this.s*FLOOR(yNew/this.s + 0.5))) - this.h/2  ! z_at_p_straight
+		!z_range = SQRT((this.s/2-this.yTan)^2-(yNew-this.s/2)^2+0*I)
+		!z_at_p_circ = SQRT(this.rTip^2-(yNew-this.s/2)^2+0*I) + this.zCirc
+		!RESULT = coordinates(2+LO) < MIN(z_at_p, MIN(z_at_p,IF REAL(z_range)=0 THEN 100 ELSE ABS(z_at_p_circ)))
+		RESULT = coordinates(2+LO) < z_at_p
+	END isInBody
+
+	BOOLEAN FUNCTION UisInBody(RIBLETS this^; ARRAY(*) OF REAL coordinates) !!!!NO! DA RIBALTARE
+		yNew = coordinates(1+LO) - yWave(this,coordinates(LO))
+		z_at_p = 2-(ABS(this.h_s*2*(yNew - this.s*FLOOR(yNew/this.s + 0.5))) - this.h/2)  ! z_at_p_straight
+		!z_range = SQRT((this.s/2-this.yTan)^2-(yNew-this.s/2)^2+0*I)
+		!z_at_p_circ = SQRT(this.rTip^2-(yNew-this.s/2)^2+0*I) + this.zCirc
+		!RESULT = coordinates(2+LO) < MIN(z_at_p, MIN(z_at_p,IF REAL(z_range)=0 THEN 100 ELSE ABS(z_at_p_circ)))
+		RESULT = coordinates(2+LO) > z_at_p
+	END UisInBody
+		
+	STRUCTURED ARRAY(x, y, z) OF REAL FUNCTION edge(RIBLETS this; ARRAY(*) OF REAL coordinates)
+                ! This function returns the closest edge to a point of coordinates
+                ! along the y-direction
+		RESULT.x = coordinates(LO)
+                yShift = yWave(this,RESULT.x)
+		yNew = coordinates(LO+1) - yShift
+		RESULT.y = [FLOOR(yNew/this.s) + 0.5]*this.s + yShift
+		RESULT.z = 0.5*this.h
+	END edge
+	
+	SUBROUTINE findEdge(POINTER TO RIBLETS this; DNS dns; ARRAY(*) OF REAL coordinates;  POINTER TO EDGE edgeCord)
+                ! This function finds the coordinate of point located on the closes edge
+                ! along the direction normal to the closest edge
+		REAL  xe(0..3), dsq(0..3), newCoord(0..2)=coordinates, trigArg=0 
+  		newCoord(LO+2)=0.5*this.h; xe(2)=coordinates(LO+0); dsq(2)=[edge(this,newCoord).y-coordinates(LO+1)]^2
+  		xe(1)=xe(2)-dns.leng(0)/2; xe(3)=xe(2)+dns.leng(0)/2
+  		LOOP WHILE xe(3)-xe(1)>tol
+    			m=IF xe(3)-xe(2)>xe(2)-xe(1) THEN 3 ELSE 1
+    			xe(0)=0.382*xe(m)+0.618*xe(2)
+    			newCoord(LO+0)=xe(0)
+			dsq(0)=[xe(0)-coordinates(LO)]^2+[edge(this,newCoord).y-coordinates(LO+1)]^2
+    			IF dsq(0)>=dsq(2) THEN xe(m)=xe(0); dsq(m)=dsq(0) ELSE
+      				xe(4-m)=xe(2); dsq(4-m)=dsq(2)
+      				xe(2)=xe(0); dsq(2)=dsq(0)
+    			END IF
+  		REPEAT
+  		newCoord(LO+0)=xe(2)
+		edgeCord.x=xe(2)
+		edgeCord.y=edge(this,newCoord).y
+		edgeCord.z=0.5*this.h
+		LOOP FOR ii = 1 TO this.waven
+  			trigArg = ~ + 2*PI*this.amp(ii)/this.lambda(ii)*COS(2*PI*xe(2)/this.lambda(ii))
+  		REPEAT
+		edgeCord.beta=ATAN(trigArg) ! beta (commento geniale XXX TODO)
+	END findEdge
+
+	SUBROUTINE cordMod(RIBLETS this^; ARRAY(*) OF REAL pA; POINTER TO ARRAY(*) OF REAL pB)
+                ! This function corrects the coordinate of the neighbour point 
+                ! pB if it crosses a complete riblet crest
+		nA = ribletsCrossed(this, pA)
+        	nB = ribletsCrossed(this, pB)
+        	IF nA#nB AND pA(2+LO)<=this.h/2 AND pB(2+LO)<=this.h/2 THEN
+			pB(1+LO)=[nB+(IF nA>nB THEN 0.5001 ELSE -0.5001)]*this.s+yWave(this,pB(1+LO))
+		END IF
+	END cordMod
+	
+	INTEGER FUNCTION ribletsCrossed(RIBLETS this; ARRAY(*) OF REAL coordinates)
+                ! This function gives the number of riblet crests that are 
+                ! on the left of the point located at coordinates
+		RESULT = FLOOR([coordinates(1+LO)-yWave(this,coordinates(LO))+this.s/2]/this.s) 
+	END ribletsCrossed
+	
+	
+			
+END riblets
