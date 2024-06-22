@@ -1,0 +1,13 @@
+nx=150
+ny=50
+nz=100
+Lx=6.28
+Ly=2
+Lz=2.4
+nu=0.000333
+Tin=0
+itc=10
+fromfield=0
+deltat=0.001
+time_max=5
+it_max=5000

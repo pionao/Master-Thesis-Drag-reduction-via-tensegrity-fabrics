@@ -1,7 +1,0 @@
-nu = 0.01	 headx = 0.0000	 heady = 0.000000        UFR=2           VFR=0       
-nx = 50		 ny = 50               nz = 50			 Lx = 6		 Ly = 2        Lz=2.261313
-cflmax = 0.12		 fouriermax = 0.5       deltat = 0.001		 maxTime = 5
-it_save=50		 it_stat=100		 it_max=5000			 it_cfl=1		 it_check=1
-it_runtimestats=10       it_start=0             it_end=0                       iz_stats=50 
-non_ph=1  
-continue=FALSE

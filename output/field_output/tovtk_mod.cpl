@@ -1,0 +1,90 @@
+!USE rtchecks
+
+SUBROUTINE ByteSwap(POINTER TO SINGLE xxx)
+C SECTION
+  register char a;
+  register char * b = (char *) xxx_;
+  register int  i = 0;
+  register int  j = sizeof(*xxx_)-1;
+  while (i<j)
+    {
+     a = b[i];
+     b[i] = b[j];
+     b[j] = a;
+     i++, j--;
+     }
+END C SECTION
+END ByteSwap
+
+SINGLE tmpu, tmpv, tmpw, tmp
+
+INTEGER nx,ny,nz,it,nalpha,nbeta
+REAL Lx, Ly, headx, heady, nu, Re, deltat, a,k,c,t
+
+INTEGER nfmin, nfmax, nstep
+ASK nfmin, nfmax, nstep
+
+LOOP FOR nop = nfmin TO nfmax BY nstep
+FILE origfield=OPENRO("undwall_"nop".field") 
+
+READ BY NAME FROM origfield nx,ny,nz,Lx,Ly,nu,deltat,it,headx,heady,t
+
+WRITE BY NAME nx,ny,nz,Lx,Ly,nu,deltat,it,headx,heady,t
+REAL zd(0..2*nz); zz=^zd(2*(*))
+VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
+REAL FUNCTION scale(REAL x)=x
+ARRAY(1..nx,1..ny,0..nz) OF VARS var
+!IF READ BY NAME FROM origfield it,headx,heady THEN
+  READ FROM origfield
+  READ FROM origfield
+  POINTER TO STORED STRUCTURE[CHAR header(POSITION(origfield)); REAL z(0..2*nz)
+      ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=origfield
+  zd=stored.z
+  var=stored.v
+REAL xx(0..nx+1), yy(0..ny+1)
+DO xx(ix)=Lx*(scale(ix/nx-1)/scale(1)+1) FOR ix=0 TO nx+1
+DO yy(iy)=Ly*(scale(iy/ny-1)/scale(1)+1) FOR iy=0 TO ny+1
+
+WRITE 'sto per scrivere il numero:  ' nop
+! versione binaria, canale piano non orlato
+  FILE vtkfile=OPEN("bar_"nop".vtk")
+  WRITE TO vtkfile "# vtk DataFile Version 2.0"
+  WRITE TO vtkfile "channel vector field"
+  WRITE TO vtkfile "BINARY"
+  WRITE TO vtkfile "DATASET RECTILINEAR_GRID"
+  WRITE TO vtkfile "DIMENSIONS "nx" "ny" "nz+1
+  WRITE TO vtkfile "X_COORDINATES "nx" float"
+  LOOP FOR ix=1 TO nx
+    tmp=SINGLE(xx(ix))
+    ByteSwap(^tmp); WRITE BINARY TO vtkfile tmp
+  REPEAT
+  WRITE TO vtkfile "Y_COORDINATES "ny" float"
+  LOOP FOR iy=1 TO ny
+    tmp=SINGLE(yy(iy))
+    ByteSwap(^tmp); WRITE BINARY TO vtkfile tmp
+  REPEAT
+  WRITE TO vtkfile "Z_COORDINATES "nz+1" float"
+  LOOP FOR iz=0 TO nz
+    tmp=SINGLE(zz(iz))
+    ByteSwap(^tmp); WRITE BINARY TO vtkfile tmp
+  REPEAT
+WRITE TO vtkfile "POINT_DATA " nx*ny*(nz+1)
+
+WRITE TO vtkfile "SCALARS p float 1"
+WRITE TO vtkfile "LOOKUP_TABLE default"
+LOOP FOR iz=0 TO nz AND iy=1 TO ny AND ix=1 TO nx
+  WITH var
+      tmp=SINGLE(var(ix,iy,iz,0)); ByteSwap(^tmp); WRITE BINARY TO vtkfile tmp 
+REPEAT
+
+WRITE TO vtkfile "VECTORS velocity float"
+LOOP FOR iz=0 TO nz AND iy=1 TO ny AND ix=1 TO nx
+  tmpu=SINGLE(var(ix,iy,iz,1)); tmpv=SINGLE(var(ix,iy,iz,2)); tmpw=SINGLE(var(ix,iy,iz,3)) 
+  ByteSwap(^tmpu); ByteSwap(^tmpv);ByteSwap(^tmpw); WRITE BINARY TO vtkfile tmpu,tmpv,tmpw 
+REPEAT 
+
+CLOSE vtkfile 
+CLOSE origfield
+REPEAT
+!END IF
+

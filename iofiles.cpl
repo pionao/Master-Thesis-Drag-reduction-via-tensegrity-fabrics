@@ -1,234 +1,85 @@
-! ------ INPUT/OUTPUT MODULE ------
+IF savedfield#NULL THEN READ FROM savedfield
+IF savedfield#NULL AND READ BY NAME FROM savedfield it,headx,heady THEN
+  IF iproc=1 THEN WRITE 'Reading restart field ...'
+  READ BY NAME FROM savedfield t
+  READ FROM savedfield
+  READ FROM savedfield
+  POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
+      ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=savedfield
+  zd=stored.z
+  var(LO+1..HI-1,LO+1..HI-1)=stored.v(var.LO1+1..var.HI1-1,var.LO2+1..var.HI2-1)
 
-! Insert new files to be created here
-! //------
-FILE runtimedata
-FILE runtimestats
-
-MODULE
-  <*
-     runtimedata_=fopen("runtimedata.txt", "a");
-  *>
-END MODULE
-
-! -------\\
-REAL FUNCTION scale(REAL x)=x
-    
-! Read data from the .field file
-! ------
-POINTER TO STORED STRUCTURE[INTEGER nxs,nys,nzs,its
-	REAL Lxs,Lys,headxs,headys,nus,times
-	REAL x(-2..2*nx+5)
-	REAL y(-2..2*ny+5)
-	REAL z(0..2*nz)
-	ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=OPENRO("Field.fld")
-IF stored#NULL THEN
-	IF has_terminal THEN WRITE "Reading velocity from restart file ..."
-  	var(LO+1..HI-1,LO+1..HI-1)=stored.v(var.LO1+1..var.HI1-1,var.LO2+1..var.HI2-1)
+  Lz=zd(2*nz)-zd(0)
+  IF iproc=1 THEN 
+      WRITE 'Reading restart field done.'
+      WRITE 'Echo data: '
+      WRITE '########################################################################################################################################################'
+      WRITE BY NAME t,it,headx,heady,zd(0),zd(2*nz),Lz,nu
+      WRITE '########################################################################################################################################################'
+      WRITE 'Continue.'
+   END IF
+      
 ELSE
-#ifdef WALLS
+  IF WALLS=2 THEN
+    DO zd(iz)=iz/nz FOR iz=0 TO 2*nz
+    !DO zd(iz)=zd(iz) - ABS(a/(k*c)) FOR iz=0 TO 2*nz 
     DO var(ix,iy,iz).u=3/2*zz(iz)*(2-zz(iz)); var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO 2*nz DIV 2
-    !DO var(ix,iy,iz).u=0; var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO nz DIV 2
-#else
-    DO var(ix,iy,iz).u=3/2*zz(iz)*(2-zz(iz)) FOR ALL ix,iy AND iz=0 TO 2*nz DIV 2
-    !DO var(ix,iy,iz).u=0 FOR ALL ix,iy AND iz=0 TO nz 
-#endif
+    !DO var(ix,iy,iz).u=8/7*zz(iz)^(1/7)*(1+0.02*COS(5*PI*zz(iz)))-Uconv; var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO nz DIV 2
+!    DO var(ix,iy,iz).u=0; var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO nz DIV 2
+  ELSE
+    DO zd(iz)=1-scale[1-iz/(2*nz-1)]/scale(1) FOR iz=0 TO 2*nz
+    DO var(ix,iy,iz).u=8/7*zz(iz)^(1/7)*(1+0.02*COS(5*PI*zz(iz)))-Uconv FOR ALL ix,iy AND iz=0 TO nz
+  END IF
 END IF
-IF stored#NULL THEN CLOSE stored
+IF savedfield#NULL THEN CLOSE savedfield
 old(*)=var(*)
 
-
-! Read input file
-SUBROUTINE readInput()
-	FILE dnsin=OPENRO('dns.in')
-		READ BY NAME FROM dnsin nu, headx, heady, UFR, VFR
-		READ BY NAME FROM dnsin nx, ny, nz, Lx, Ly, Lz
-		READ BY NAME FROM dnsin cflmax, fouriermax, deltat, maxTime
-		READ BY NAME FROM dnsin it_save, it_stat, it_max, it_cfl, it_check 
-		READ BY NAME FROM dnsin it_runtimestats, it_start, it_end, iz_stats 
-		READ BY NAME FROM dnsin continue
-		READ BY NAME FROM dnsin non_ph
-		END readInput
-! Define the structures containing the data related to the grid
-! ------
-STRUCTURE(REAL d2xp,d2xm,d2x0,d1xm,d1x,d1xp,d2xpp,d2xpm,d2xp0) xc(0..nx+1)
-STRUCTURE(REAL d2yp,d2ym,d2y0,d1ym,d1y,d1yp,d2ypp,d2ypm,d2yp0) yc(0..ny+1)
-STRUCTURE(REAL d2zp,d2zm,d2z0,d1zm,d1z,d1zp,d2zpp,d2zpm,d2zp0) zc(1..nz-1)
-ARRAY(0..ny+1) OF REAL stats_dy
-
-DO WITH xc(ix)
-	d1xm=1/[xx(ix)-xx(ix-1)]
-	d1x=1/[xd(2*ix+1)-xd(2*ix-1)]
-  	d1xp=1/[xx(ix+1)-xx(ix)]
-  	d2xm=d1x*d1xm
-  	d2xp=d1x*d1xp
-  	d2x0=d2xm+d2xp
-    	d2xpp=1/[xd(2*ix+3)-xd(2*ix+1)]*d1xp
-    	d2xpm=d1x*d1xp
-    	d2xp0=d2xpm+d2xpp
-FOR ix=0 TO nx+1
-
-DO WITH yc(iy)
-	d1ym=1/[yy(iy)-yy(iy-1)]
-	d1y=1/[yd(2*iy+1)-yd(2*iy-1)]
-  	d1yp=1/[yy(iy+1)-yy(iy)]
-  	d2ym=d1y*d1ym
-  	d2yp=d1y*d1yp
-  	d2y0=d2ym+d2yp
-    	d2ypp=1/[yd(2*iy+3)-yd(2*iy+1)]*d1yp
-    	d2ypm=d1y*d1yp
-    	d2yp0=d2ypm+d2ypp
-    	stats_dy(iy)=yd(2*iy+1)-yd(2*iy-1)
-FOR iy=0 TO ny+1
-
-DO WITH zc(iz)
-	d1zm=1/[zz(iz)-zz(iz-1)]
-	d1z=1/[zd(2*iz+1)-zd(2*iz-1)]
-  	d1zp=1/[zz(iz+1)-zz(iz)]
-  	d2zm=d1z*d1zm
-  	d2zp=d1z*d1zp
-  	d2z0=d2zm+d2zp
-  	IF iz<nz-1 THEN
-    		d2zpp=1/[zd(2*iz+3)-zd(2*iz+1)]*d1zp
-    		d2zpm=d1z*d1zp
-    		d2zp0=d2zpm+d2zpp
-	ELSE
-		d2zpp=d1zp*d1zp
-    		d2zpm=d1z*d1zp
-    		d2zp0=d2zpm+d2zpp
-    	END IF
-FOR iz=1 TO nz-1
-
-! Save field -- parallel
-! ------
 SUBROUTINE savefield(POINTER TO CSTRING name)
-	LOOP FOR iP=1 TO nproc
-    		IF iP=iproc THEN
-      			stored=OPEN(""name".partial")
-      			IF iproc=1 THEN
-        			stored.nxs=nx; stored.nys=ny; stored.nzs=nz; stored.its=it
-         			stored.headxs=headx; stored.headys=heady; stored.times=time
-         			stored.nus=nu; stored.Lxs=Lx; stored.Lys=Ly
-         			stored.x=xd
-         			stored.y=yd
-         			stored.z=zd
-      			END IF
-      			LOOP FOR ix=var.LO1+1 TO var.HI1-1
-        			ARRAY(var.LO2+1..var.HI2-1,0..nz) OF VARS iobuf = var(ix,LO+1..HI-1)
-        			stored.v(ix,var.LO2+1..var.HI2-1)=iobuf
-      			REPEAT
-      			CLOSE stored
-    		END IF
-    		mpi_barrier()
-  	REPEAT
-  	IF has_terminal THEN rename(""name".partial", name)
+   LOOP FOR iP=1 TO nproc
+   IF iP=iproc THEN
+      savedfield=OPEN(""name".partial")
+      WRITE TO savedfield "! "myname
+      WRITE BY NAME TO savedfield nx,ny,nz,Lx:1.15,Ly:1.15,nu:1.15,deltat:1.15
+      WRITE BY NAME TO savedfield it,headx:1.15,heady:1.15,t:1.15
+      WRITE BY NAME TO savedfield
+      POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
+      ARRAY(1..nx,1..ny,0..nz) OF VARS v] tostore=savedfield
+!      WRITE BINARY TO savedfield zd
+      tostore.z=zd
+      LOOP FOR ix=var.LO1+1 TO var.HI1-1
+        ARRAY(var.LO2+1..var.HI2-1,0..nz) OF VARS iobuf = var(ix,LO+1..HI-1)
+        tostore.v(ix,var.LO2+1..var.HI2-1)=iobuf
+!         WRITE BINARY TO savedfield iobuf
+      REPEAT
+      CLOSE savedfield
+    END IF
+    mpi_barrier()
+  REPEAT
+  IF has_terminal THEN rename(""name".partial", name)
 END savefield
 
-INTEGER cnt_stats=0
-! Define the statistics file. Check the order and which quantities to store
-! ------
-STRING statsfilename = WRITE("stats.bin")
-STATVARS = STRUCTURED ARRAY[um,vm,wm,u2,v2,w2,uw,uv] OF REAL
-STRUCTURED ARRAY[um,vm,wm,u2,uw,v2,w2] OF REAL stats(0..nz)=0 
-ARRAY(var.LO2..var.HI2,0..nz) OF STATVARS statsX=0, statslocX=0, statstmpX=0
-ARRAY(var.LO1..var.HI1) OF REAL statsY=0, statslocY=0
-POINTER TO STORED STRUCTURE[ARRAY(0..ny+1) OF REAL y_img
-                            ARRAY(0..nz) OF REAL z_img 
-                            ARRAY(0..ny+1,0..nz) OF STATVARS stats_img
-                            INTEGER cnt_stats_img
-                            ARRAY(0..ny+1) OF REAL y_delta
-                           ] diskstats=OPENRO(statsfilename)
-BOOLEAN statsExist=diskstats#NULL
-
-! Routine to evaluate already existing stats file
-! ------
-IF statsExist THEN
-  	IF has_terminal THEN WRITE "Reading statistics file : "statsfilename; FLUSH(stdout); END IF
-  	WITH diskstats: 
-      		statsX(var.LO2+1..var.HI2-1,0..nz)=stats_img(var.LO2+1..var.HI2-1,0..nz)
-      		cnt_stats=cnt_stats_img
-      		statsX=~*cnt_stats
-  	CLOSE(diskstats)
-END IF
 
 
-! Save statistics
-! ------
-SUBROUTINE save_statsX()
-	LOOP FOR iP=1 TO nproc
-      		IF iP=iproc THEN
-        		IF iprocx=nprocx THEN WITH diskstats:
-            			diskstats=OPEN(statsfilename)
-            			INTEGER miny = var.LO2+INTEGER(iprocy#1)
-            			INTEGER maxy = var.HI2-INTEGER(iprocy#nprocy)
-            			statsX=~/cnt_stats
-            			stats_img(miny..maxy,0..nz)=statsX(miny..maxy,0..nz)
-            			IF iprocy=1 THEN cnt_stats_img=cnt_stats; y_img=yy(LO+1..HI-1); z_img=zz; y_delta=stats_dy;
-            			CLOSE diskstats
-        		END IF
-      		END IF
-      		mpi_barrier()
-    	REPEAT
-END save_statsX
-
-SUBROUTINE save_statsY()
-	LOOP FOR iP=1 TO nproc
-      		IF iP=iproc THEN
-        		IF iprocy=1  THEN 
-				MODULE
-				  <*
-				     runtimestats_=fopen("runtimestats.bin", "a");
-				  *>
-				END MODULE
-        			INTEGER minx = var.LO1+INTEGER(iprocx#1)
-            			INTEGER maxx = var.HI1-INTEGER(iprocx#nprocx)
-        			WRITE BINARY TO runtimestats statsY(minx..maxx)
-        			FLUSH stdout
-        			CLOSE(runtimestats)
-        		END IF
-      		END IF
-      		mpi_barrier()
-    	REPEAT
-END save_statsY
-
-! Write x-averaged statistics to file (running average)
-! ------
 SUBROUTINE output
-	IF it MOD it_stat = 0 THEN
-    		INC cnt_stats
-    		pbc(var(*,*,**))
-    		statslocX=0; statstmpX=0
-    		pbcwait
-    		DO WITH var, statslocX, reslocX, xc(ix):
-    			um(iy,iz)=~+u(ix,iy,iz)/d1xp/Lx
-    			vm(iy,iz)=~+[v(ix,iy,iz)+v(ix,iy-1,iz)]/2/d1x/Lx
-      			wm(iy,iz)=~+[w(ix,iy,iz)+w(ix,iy,iz-1)]/2/d1x/Lx
-      			u2(iy,iz)=~+[u(ix,iy,iz)+u(ix-1,iy,iz)]^2/4/d1x/Lx
-      			v2(iy,iz)=~+[v(ix,iy,iz)+v(ix,iy-1,iz)]^2/4/d1x/Lx
-      			w2(iy,iz)=~+[w(ix,iy,iz)+w(ix,iy,iz-1)]^2/4/d1x/Lx
-      			uw(iy,iz)=~+[u(ix,iy,iz)+u(ix-1,iy,iz)]*[w(ix,iy,iz)+w(ix,iy,iz-1)]/4/d1x/Lx 
-      			uv(iy,iz)=~+[u(ix,iy,iz)+u(ix-1,iy,iz)]*[v(ix,iy,iz)+v(ix,iy-1,iz)]/4/d1x/Lx
-    		FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO MIN[var.HI2,ny+1] AND iz=1 TO nz
-    		accumulateX(statslocX(***),statstmpX(***)); statsX=~+statstmpX
-  	END IF
-  	IF has_terminal THEN
-  	   WRITE it, time:1.6, headx:1.15, heady:1.15, flowrate.x/nprocx/nprocy:1.12, flowrate.y/nprocx/nprocy:1.12, (flowrate.x-flowrate.y)/nprocx/nprocy:1.12,(cfl(0)*deltat):1.10, (cfl(1)*deltat):1.10, deltat:1.15
-  	
-    		WRITE TO runtimedata "# "it, time:1.15, headx:1.15, heady:1.15, flowrate.x/nprocx/nprocy:1.12, flowrate.y/nprocx/nprocy:1.12, (flowrate.x-flowrate.y)/nprocx/nprocy:1.12,(cfl(0)*deltat):1.10, (cfl(1)*deltat):1.10, deltat:1.15
-    		FLUSH stdout
-    		FLUSH runtimedata
-  	END IF
-END output
+!  IF it MOD 5 = 0 THEN
+    STRUCTURED ARRAY(x,y) OF REAL Q=0; INTEGER count=0
+    LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+      INC count
+      Q.x=~+({SUM [var(ix,iy,iz).u]*[zd(2*iz+1)-zd(2*iz-1)] FOR iz=1 TO nz-1}-Q.x)/count
+      Q.y=~+({SUM [var(ix,iy,iz).v]*[zd(2*iz+1)-zd(2*iz-1)] FOR iz=1 TO nz-1}-Q.y)/count
+    REPEAT
+    accumulate(Q)
+    IF has_terminal THEN
+      WRITE it,t, headx:1.15, heady:1.15, Q.x/nprocx/nprocy:1.15, Q.y/nprocx/nprocy:1.15
+      FLUSH stdout
+    END IF
 
-SUBROUTINE outputRuntime
-	IF it MOD it_runtimestats=0 AND it>=it_start AND it<=it_end THEN
-    		pbc(var(*,*,**))
-    		statslocY=0; statsY=0
-    		pbcwait
-    		DO WITH var, yc(iy):
-    			statslocY(ix)=~+p(ix,iy,iz_stats)/d1y/Ly 
-    		FOR ix=var.LO1+1 TO MIN[var.HI1,nx+1] AND iy=var.LO2+1 TO var.HI2-1
-    		accumulateY(statslocY(LO+(*)),statsY(LO+(*)))
-    		save_statsY()
-  	END IF 
-END outputRuntime
+!(
+  ELSE
+    IF has_terminal THEN
+      WRITE it,t, headx:1.15, heady:1.15, cfl, deltat
+      FLUSH stdout
+    END IF
+!)
+!  END IF
+END output

@@ -1,5 +1,0 @@
-C SECTION
-
-    printf("Hello World!");
-
-END C SECTION

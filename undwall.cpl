@@ -1,0 +1,301 @@
+USE complex
+USE rbmat
+!USE rtchecks
+
+
+! Defines
+! ------------------------
+!#define cpg
+#define mpiverbose
+! ------------------------
+
+! Inclusioni Tensegrity
+USE tensegrity_submodule/channel_inclusions
+
+TENSEGRITY_INIT tensegrity_init
+readInputFile(tensegrity_init, "input/tensegrity.in")
+
+WALLS=2
+INTEGER nx,ny,nz,it=0,itc=50,it_max
+REAL headx=0.,heady=0.,nu,Lx,Ly,Lz,deltat,Uconv=0,cfl,Reb,tau,t,Tin=100
+REAL ww,delta,xx,yy,time_max
+INTEGER izu,izv,izw,fromfield
+myname=basename(COMMANDLINE(0))
+
+FILE in_data=OPEN("input/data.in")
+READ BY NAME FROM in_data nx,ny,nz,Lx,Ly,Lz,nu,Tin,itc,fromfield,deltat,time_max,it_max ! some data is overwritten if myname.field is present
+
+REAL t=0
+
+INTEGER n_t = FLOOR(it_max / itc)
+TENSEGRITY(tensegrity_init.nx, tensegrity_init.nz, tensegrity_init.n_C, tensegrity_init.n_B, tensegrity_init.n_T, tensegrity_init.n_G, tensegrity_init.n_N, tensegrity_init.n_N_dof, tensegrity_init.n_T_dof, 
+           tensegrity_init.n_q_tilde, tensegrity_init.n_P, tensegrity_init.n_int, tensegrity_init.n_tri_int, n_t, 2*(nx+2), 2*(ny+2), 2*tensegrity_init.n_B, 3*tensegrity_init.n_B, 3*tensegrity_init.n_G) tensegrity
+initilizeTensegrity(tensegrity, tensegrity_init)
+Lx = tensegrity.nz*tensegrity.l_per
+Ly = tensegrity.nx*tensegrity.l_per
+tensegrity.time = t
+LOOP FOR i = 1 TO n_t
+  tensegrity.t_vec(i) = (i-1)*deltat
+REPEAT
+
+! Salvataggio parametri tensegrity
+ARRAY(10) OF INTEGER par_int_arr = (tensegrity.nx, tensegrity.nz, tensegrity.n_C, tensegrity.n_B, tensegrity.n_T,
+                                    tensegrity.n_G, tensegrity.n_N, tensegrity.n_N_dof, tensegrity.n_T_dof, tensegrity.n_q_tilde)
+ARRAY(2) OF REAL par_real_arr = (tensegrity.l_b, tensegrity.l_per)
+vec_to_csv_int(par_int_arr, "output/tensegrity_parameters/par_int_arr.csv")
+vec_to_csv_real(par_real_arr, "output/tensegrity_parameters/par_real_arr.csv")
+vec_to_csv_real(tensegrity.X_0, "output/tensegrity_output/X_0.csv")
+mat_to_csv_int(tensegrity.P_mat(*,*,1), "output/tensegrity_output/P_mat.csv")
+mat_to_csv_int(tensegrity.P_mat(*,*,2), "output/tensegrity_output/P_mat_per.csv")
+mat_to_csv_int(tensegrity.ghost_nodes, "output/tensegrity_output/ghost_nodes.csv")
+vec_to_csv_real(tensegrity.t_vec, "output/tensegrity_output/t_vec.csv")
+
+
+
+WRITE '########################################################################################################################################################'
+WRITE 'Data from data.in: '
+WRITE BY NAME nx,ny,nz,Lx,Ly,Lz,nu,Tin,itc,fromfield
+WRITE '########################################################################################################################################################'
+
+FILE savedfield=OPENRO(""myname".field")
+IF savedfield#NULL THEN READ BY NAME FROM savedfield nx,ny,nz,Lx,Ly,nu,deltat
+
+deltax=Lx/nx; deltay=Ly/ny
+
+UFR=WALLS*(1-Uconv)
+VFR=0
+REAL FUNCTION scale(REAL x)=x
+INCLUDE parallelbcs.h
+REAL zd(0..2*nz)
+zz=^zd(2*(*))
+VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
+ARRAY[nxl(nx)-1..nxh(nx)+1,nyl(ny)-1..nyh(ny)+1,0..nz] OF VARS var=0,old
+
+USE parallelbcs
+USE iofiles
+! rescale zd
+DO zd(iz)=iz/nz FOR iz=0 TO 2*nz
+zd=Lz*zd/2.0 
+
+REAL FUNCTION wall(REAL x,y; TENSEGRITY this^)
+
+  RESULT=  this.bar_weights(1)*this.vert_pos(3,1) +
+           this.bar_weights(2)*this.vert_pos(3,2) +
+           this.bar_weights(3)*this.vert_pos(3,3)
+END wall
+BOOLEAN FUNCTION bwall(REAL x,y,z; TENSEGRITY this^)
+
+  RESULT=z<wall(x,y,tensegrity)
+END bwall
+BOOLEAN FUNCTION twall(REAL x,y,z; TENSEGRITY this^)
+
+    RESULT=z>2.4
+END twall
+REAL FUNCTION bwbc(REAL x,y; TENSEGRITY this^)
+
+  RESULT= this.bar_weights(1)*this.vert_vel_zy(1) +
+          this.bar_weights(2)*this.vert_vel_zy(2) +
+          this.bar_weights(3)*this.vert_vel_zy(3)
+END bwbc
+REAL FUNCTION twbc(REAL x,y)
+
+  RESULT=0
+END twbc
+
+
+
+USE timestep
+
+REAL FUNCTION Bisection[FUNCTION(REAL s)->BOOLEAN f; REAL VARIABLE x1, x2]
+  f1 = f(x1); f2 = f(x2)
+  IF f1 = f2 THEN ERROR "Bisection point not included in " x1 " " x2
+  LOOP halve
+    RESULT=(x1+x2)/2
+    IF ABS(x2-x1)<1E-10 THEN EXIT Bisection
+    IF f(RESULT)=f1 THEN x1=RESULT ELSE x2=RESULT
+  REPEAT halve
+END Bisection
+
+SUBROUTINE calcoef(FUNCTION(REAL x,y,z; TENSEGRITY this^)->BOOLEAN InBody; POINTER TO ARRAY(*) OF REAL imbc^; INTEGER izlo,izhi,ix,iy,dix,diy,diz; TENSEGRITY this^)
+  imbc=NEW ARRAY(izlo..izhi) OF REAL
+  x=(ix+0.5*dix)*deltax; y=(iy+0.5*diy)*deltay
+  LOOP FOR iz=izlo TO izhi
+      z=zd(2*iz+diz)
+      deltazm=z-zd(2*iz-2+diz)
+      deltazp=zd(2*iz+2+diz)-z
+      d2zm=1/deltazm/[zd(2*iz+diz+1)-zd(2*iz+diz-1)]
+      d2zp=1/deltazp/[zd(2*iz+diz+1)-zd(2*iz+diz-1)]
+      REAL rsd=0
+      IF InBody(x,y,z,this) THEN rsd=1E20 ELSE
+	      REAL d=deltax
+	      IF InBody[x-deltax,y,z,this] THEN d=x-Bisection[<InBody(s,y,z,this)>,x-deltax,x]
+      	IF d=0 THEN rsd=1E20 ELSE rsd=~+deltax/d*d2x
+	      d=deltax
+	      IF InBody(x+deltax,y,z,this) THEN d=Bisection[<InBody(s,y,z,this)>,x,x+deltax]-x
+	      IF d=0 THEN rsd=1E20 ELSE rsd=~+deltax/d*d2x
+	      d=deltay
+	      IF InBody(x,y-deltay,z,this) THEN d=y-Bisection[<InBody(x,s,z,this)>,y-deltay,y]
+	      IF d=0 THEN rsd=1E20 ELSE rsd=~+deltay/d*d2y
+	      d=deltay
+	      IF InBody(x,y+deltay,z,this) THEN d=Bisection[<InBody(x,s,z,this)>,y,y+deltay]-y
+	      IF d=0 THEN rsd=1E20 ELSE rsd=~+deltay/d*d2y
+	      d=deltazm
+	      IF InBody(x,y,z-deltazm,this) THEN d=z-Bisection[<InBody(x,y,s,this)>,z-deltazm,z]
+	      IF d=0 THEN rsd=1E20 ELSE rsd=~+deltazm/d*d2zm
+	      d=deltazp
+	      IF InBody(x,y,z+deltazp,this) THEN d=Bisection[<InBody(x,y,s,this)>,z,z+deltazp]-z
+	      IF d=0 THEN rsd=1E20 ELSE rsd=~+deltazp/d*d2zp
+      END IF
+      imbc(iz)=[rsd-2*d2x-2*d2y-d2zm-d2zp]*nu
+  REPEAT
+END calcoef
+
+SUBROUTINE calcimbc(TYPEOF(buimbc) bimbc^,timbc^; INTEGER dix,diy,diz; TENSEGRITY this^)
+  d2x=1/deltax/deltax; d2y=1/deltay/deltay
+  LOOP FOR ix=bimbc.LO1 TO bimbc.HI1 AND iy=bimbc.LO2 TO bimbc.HI2
+    IF iy=bimbc.LO2 THEN
+      x=(ix+0.5*dix)*deltax; y=(iy+0.5*diy)*deltay
+      find_ind_panel(this,x,y,ix,iy,dix,diy)
+      INTEGER izlo=0
+      DO INC izlo WHILE bwall[x,y,zd(2*izlo+diz),this]
+      INTEGER izhi=izlo
+      LOOP FOR iz=izlo+1 TO nz-1-diz
+        z=zd(2*iz+diz)
+        IF bwall(x,y,z,this) OR bwall[x+deltax,y,z,this] OR
+            bwall[x-deltax,y,z,this] OR bwall[x,y+deltay,z,this] OR
+            bwall[x,y-deltay,z,this] OR bwall[x,y,zd(2*iz+2+diz),this] OR
+            bwall[x,y,zd(2*iz-2+diz),this] THEN izhi=iz
+      REPEAT
+      calcoef(bwall,bimbc(ix,iy),izlo,izhi,ix,iy,dix,diy,diz,this)
+      izhi=[IF diz=1 THEN nz-1 ELSE nz]
+      DO izhi=~-1 WHILE twall[x,y,zd(2*izhi+diz),this]
+      izlo=izhi
+      LOOP FOR iz=izhi-1 DOWN TO 1
+        z=zd(2*iz+diz)
+        IF twall(x,y,z,this) OR twall[x+deltax,y,z,this] OR
+            twall[x-deltax,y,z,this] OR twall[x,y+deltay,z,this] OR
+            twall[x,y-deltay,z,this] OR twall[x,y,zd(2*iz+2+diz),this] OR
+            twall[x,y,zd(2*iz-2+diz),this] THEN izlo=iz
+      REPEAT
+      calcoef(twall,timbc(ix,iy),izlo,izhi,ix,iy,dix,diy,diz,this)
+    ELSE
+      bimbc(ix,iy)=bimbc(ix,LO); timbc(ix,iy)=timbc(ix,LO) 
+    END IF
+  REPEAT
+END calcimbc
+
+INTEGER nop = 0
+
+USE timestep
+
+   calcimbc(buimbc,tuimbc,1,0,0,tensegrity)
+   calcimbc(bvimbc,tvimbc,0,1,0,tensegrity)
+   calcimbc(bwimbc,twimbc,0,0,1,tensegrity)
+
+
+IF iproc=1 THEN WRITE 'Starting the time loop ...'
+LOOP timeloop WHILE it < it_max AND t < time_max
+
+  !{courant(tau)
+  cfl=tau*deltat
+  deltat=cfl/tau!}
+
+
+  LOOP FOR ALL ix AND ALL iy
+    find_ind_panel(tensegrity,ix*deltax,iy*deltay,ix,iy,0,0)
+    DO var(ix,iy,iz).u=0 FOR iz=0 TO buimbc(ix,iy).LO-1; DO var(ix,iy,iz).u=0 FOR iz=tuimbc(ix,iy).HI+1 TO nz
+    DO var(ix,iy,iz).v=0 FOR iz=0 TO bvimbc(ix,iy).LO-1; DO var(ix,iy,iz).v=0 FOR iz=tvimbc(ix,iy).HI+1 TO nz
+    DO var(ix,iy,iz).w=bwbc(ix*deltax,iy*deltay,tensegrity) FOR iz=0 TO bwimbc(ix,iy).LO-1; DO var(ix,iy,iz).w=twbc(ix*deltax,iy*deltay) FOR iz=twimbc(ix,iy).HI+1 TO nz
+  REPEAT
+
+  timestep(rai1, tensegrity) 
+  timestep(rai2, tensegrity)
+  timestep(rai3, tensegrity)
+
+  timestep_tensegrity(tensegrity, deltat)
+
+  INC it; t=~+deltat
+  LOOP FOR ALL ix
+    iy=buimbc.LO2
+    FREE buimbc(ix,iy), bvimbc(ix,iy), bwimbc(ix,iy), tuimbc(ix,iy), tvimbc(ix,iy), twimbc(ix,iy)
+  REPEAT
+  output
+
+  !IF it MOD 100 = 0 THEN savefield("undwall.field")
+  IF t>=Tin AND it MOD itc = 0 THEN
+    INC nop 
+    savefield("output/field_output/"myname"_"nop".field")
+    vec_to_csv_real(tensegrity.q_tilde, "output/tensegrity_output/time_serie/q_tilde_"nop".csv")
+  END IF 
+
+
+   calcimbc(buimbc,tuimbc,1,0,0, tensegrity)
+   calcimbc(bvimbc,tvimbc,0,1,0, tensegrity)
+   calcimbc(bwimbc,twimbc,0,0,1, tensegrity)
+
+  timestep_tensegrity(tensegrity, deltat) 
+
+!{
+   ! experimental XXX
+WRITE BY NAME tvimbc(5,1).LO
+WRITE BY NAME tvimbc(5,1).HI
+WRITE BY NAME bvimbc(5,1).LO
+WRITE BY NAME bvimbc(5,1).HI
+
+WRITE BY NAME tuimbc(5,1)
+WRITE BY NAME tvimbc(5,30)
+WRITE BY NAME twimbc(5,1)
+
+WRITE BY NAME buimbc(5,1)
+WRITE BY NAME bvimbc(5,30)
+WRITE BY NAME bwimbc(5,1)
+
+   LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+      xx=(ix+0.5)*deltax; yy=iy*deltay
+      izu=buimbc(ix,iy).LO
+      WITH var(ix+*,iy+*,izu+*)
+         delta=zz(izu)-wall(xx,yy,t)
+         u(0,0,0) = u(0,0,1)/(zz(izu+1)-zz(izu) + delta)*delta
+      END WITH
+      izu=tuimbc(ix,iy).HI
+      WITH var(ix+*,iy+*,izu+*)
+         delta= 2.-wall(xx,yy,t) - zz(izu)
+         u(0,0,0) = u(0,0,-1)/(zz(izu)-zz(izu-1)+delta)*delta
+      END WITH
+
+      xx=ix*deltax; yy=(iy+0.5)*deltay
+      izv=bvimbc(ix,iy).LO
+      WITH var(ix+*,iy+*,izv+*)      
+         delta=zz(izv)-wall(xx,yy,t)
+         v(0,0,0) = v(0,0,1)/(zz(izv+1)-zz(izv) + delta)*delta
+      END WITH
+      izv=tvimbc(ix,iy).HI
+      WITH var(ix+*,iy+*,izv+*)
+         delta= 2.-wall(xx,yy,t) - zz(izv)
+         v(0,0,0) = v(0,0,-1)/(zz(izv)-zz(izv-1)+delta)*delta
+      END WITH
+
+      xx=ix*deltax; yy=iy*deltay
+      izw=bwimbc(ix,iy).LO
+      WITH var(ix+*,iy+*,izw+*)
+         delta=zd(2*izw+1)-wall(xx,yy,t)
+         ww=bwbc(xx,yy,t)
+         w(0,0,0) = ww + (w(0,0,1)-ww)/(zd(2*(izw+1)+1)-zd(2*izw+1) + delta)*delta
+      END WITH
+      izw=twimbc(ix,iy).HI
+      WITH var(ix+*,iy+*,izw+*)
+         delta= 2.-wall(xx,yy,t) - zd(2*izw+1)
+         ww=twbc(xx,yy,t)
+         w(0,0,0) = ww + (w(0,0,-1)-ww)/(zd(2*izw+1)-zd(2*(izw-1)+1) + delta)*delta
+      END WITH
+
+   REPEAT
+!}
+REPEAT timeloop
+
+
+! Finalisations
+! ------------------------
+MODULE finalise
+ <* MPI_Finalize();*>
+END finalise

@@ -1,19 +1,24 @@
-!#includedir "/home/lorenzo/Programmi/openmpi/openmpi-5.0.3/installation/include"
-#includedir "/usr/lib/x86_64-linux-gnu/openmpi/include/"
+!#includedir "/opt/bwhpc/common/mpi/openmpi/4.1.0-intel-19.1/include/"
+!#includedir "/opt/openmpi/openmpi_4.0.1_ifort_19.0.1/include/"
+!#includedir "/opt/hlrs/non-spack/mpi/openmpi/4.0.5-gcc-9.2.0/include/"
+#includedir "/opt/openmpi/openmpi_4.0.1_ifort_19.0.1/include/"
+!#includedir "/opt/hpe/hpc/mpt/mpt-2.23/bin/include/"
+!#includedir "/opt/hlrs/non-spack/compiler/intel/19.1.0.166/compilers_and_libraries_2020.0.166/linux/mpi/intel64/include/"
 #include <mpi.h>
 
-
-!INTEGER iprocx, nprocx=atoi(COMMANDLINE(1)), iprocy, nprocy=atoi(COMMANDLINE(2))
+INTEGER iprocx, nprocx=atoi(COMMANDLINE(1)), iprocy, nprocy=atoi(COMMANDLINE(2))
+!INTEGER iprocx, nprocx=1, iprocy, nprocy=1
 INTEGER prevx=-99, nextx=-99, prevy=-99, nexty=-99
-!INTEGER iproc, nproc, 
-INTEGER nreqs, nsreqs
+INTEGER iproc, nproc, nreqs, nsreqs
 ARRAY(0..3) OF POINTER TO ARRAY(*,*) OF REAL unpckbuf 
 INTEGER szbuf
+
+
 C SECTION
   MPI_Status status[4];
   MPI_Request request[4];
   MPI_Request srequest[4];
-  MPI_Comm  cart_comm, cart_comm_x, cart_comm_y;
+  MPI_Comm  cart_comm, cart_comm_x;
   int nproc, iproc, nprocx, nprocy, iprocx, iprocy, idim[2];
   int prevx, nextx, prevy, nexty;
 END C SECTION
@@ -39,12 +44,11 @@ SUBROUTINE init_mpi()
        // Create a communicator with all processes that hold the same y-slab
        // this is useful for collecting x-averaged statistics, for instance
        MPI_Comm_split(cart_comm, iprocy_, iproc_, &cart_comm_x);
-       MPI_Comm_split(cart_comm, iprocx_, iproc_, &cart_comm_y);
     *>
 END init_mpi 
 
 init_mpi()
-has_terminal = iprocx=nprocx AND iprocy=nprocy
+has_terminal == iprocx=nprocx AND iprocy=nprocy
 INTEGER FUNCTION nxl(INTEGER n)=FLOOR[(iprocx-1)*n/nprocx]+1
 INTEGER FUNCTION nxh(INTEGER n)=FLOOR[iprocx*n/nprocx]
 INTEGER FUNCTION nyl(INTEGER n)=FLOOR[(iprocy-1)*n/nprocy]+1
@@ -115,7 +119,6 @@ IF has_terminal THEN
    WRITE BY NAME nx,ny,nz,it
    WRITE BY NAME Lx, Ly, deltat, nu
    WRITE BY NAME headx, heady
-   WRITE BY NAME it_save, it_stat, it_max
    WRITE ""
 END IF
 

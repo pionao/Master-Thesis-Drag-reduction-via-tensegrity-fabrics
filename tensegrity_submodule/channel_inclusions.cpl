@@ -1,0 +1,2355 @@
+TENSEGRITY_INIT = STRUCTURE[ INTEGER nx,nz,n_C,n_B,n_T,n_G,n_N,n_N_dof,n_T_dof,n_q_tilde,n_P,n_int,n_tri_int;
+                              REAL rho_b,k,sigma,h,r]
+
+TENSEGRITY = STRUCTURE[ INTEGER CONSTANT nx,nz,n_C,n_B,n_T,n_G,n_N,n_N_dof,n_T_dof,n_q_tilde,n_P,n_int,n_tri_int,n_t,nx_grid,ny_grid,
+                                         n_B2,n_B3,n_G3;
+                         INTEGER n_q,pan_ind,ind_A,ind_B,ind_G,parent_ind,ind_1,ind_2,ind_3,ghost_ind,per_dir;
+                         REAL Lx,Lz,rho_b,k,sigma,h,r,l_b,I_0,alpha_1,l_per,l_v_1,l_h_1,
+                              l_u_l,l_u_s,l_u_l_0,l_h_0,l_u_s_0,l_i_0,l_i_norm,
+                              lambda_1,lambda_2,lambda_3,dA,d_lambda,normal_norm; 
+                         ARRAY(n_B,2) OF INTEGER B_con;
+                         ARRAY(n_T,2) OF INTEGER T_con;
+                         ARRAY(n_G,3) OF INTEGER ghost_nodes;
+                         ARRAY(n_T) OF REAL l_0;
+                         ARRAY(n_P,3,2) OF INTEGER P_mat;
+                         ARRAY(n_tri_int,3) OF REAL bar_lambda_mat;
+                         ARRAY(n_N_dof) OF REAL X_0;
+                         ARRAY(n_q_tilde) OF REAL q_0_tilde;
+                         ARRAY(n_t) OF REAL t_vec;
+                         ARRAY(n_N_dof) OF REAL X, X_dot;
+                         ARRAY(n_q_tilde) OF REAL q_tilde,q_tilde_old;
+                         ARRAY(n_q_tilde,3) OF REAL K_mat;
+                         ARRAY(3) OF REAL bar_weights;
+                         ARRAY(3,3) OF REAL vert_pos;
+                         ARRAY(3) OF REAL vert_vel_zy,f_t,l_i,l_i_dot,normal,dir_1,dir_2,X_1,X_2,X_3,x,df;
+                         ARRAY(0..nx_grid-1, 0..ny_grid-1) OF INTEGER pan_ind_mat;
+                         REAL time;
+                         ARRAY(n_B2) OF REAL Cq_dot,f_mom;
+                         ARRAY(n_B3) OF REAL f_ext, f_n;
+                         ARRAY(n_G3) OF REAL f_n_ghost
+		   ]
+
+SUBROUTINE B_con_comp(TENSEGRITY this^) FOLLOWS
+SUBROUTINE T_con_comp(TENSEGRITY this^) FOLLOWS
+SUBROUTINE P_mat_comp(TENSEGRITY this^) FOLLOWS
+SUBROUTINE bar_lambda_comp(TENSEGRITY this^) FOLLOWS
+SUBROUTINE X_0_comp(TENSEGRITY this^) FOLLOWS
+SUBROUTINE q_0_tilde_comp(TENSEGRITY this^) FOLLOWS
+
+SUBROUTINE readInputFile(TENSEGRITY_INIT this^; STRING fname)
+     FILE tensegrityin=OPENRO(fname)
+     INTEGER nx,nz,n_int,n_tri_int,n_t
+     REAL rho_b,k,sigma,h,r
+     READ BY NAME FROM tensegrityin nx,nz,n_int,rho_b,k,sigma,h,r
+
+     this.nx    = nx
+     this.nz    = nz
+     this.n_int = n_int
+     this.rho_b = rho_b
+     this.k     = k
+     this.sigma = sigma
+     this.h     = h
+     this.r     = r
+
+     this.n_C       = this.nx*this.nz
+     this.n_B       = 4*this.nx*this.nz
+     this.n_T       = 12*(this.nx-1)*(this.nz-1) - 3*((this.nx-2)*(this.nz-1)+(this.nz-2)*(this.nx-1)) + 3*4 + 3*(this.nx-2) + 3*(this.nz-2) + 4*this.nx*this.nz
+     this.n_G       = 2*this.nx + 2*this.nz
+     this.n_N       = this.n_C * 8 + this.n_G
+     this.n_N_dof   = 3*this.n_N
+     this.n_T_dof   = 3*this.n_T
+     this.n_q_tilde = 2*2*this.n_B
+     this.n_P       = 6*(this.nx+2)*(this.nz+2) + 2*(this.nx+1)*(this.nz+1)
+
+     this.n_tri_int = (this.n_int-1)^2
+END readInputFile
+
+SUBROUTINE initilizeTensegrity(TENSEGRITY this^; TENSEGRITY_INIT tensegrity_init)
+     this.rho_b = tensegrity_init.rho_b
+     this.k     = tensegrity_init.k
+     this.sigma = tensegrity_init.sigma
+     this.h     = tensegrity_init.h
+     this.r     = tensegrity_init.r
+
+     this.n_q     = 2*this.n_B
+     this.l_b     = SQRT(this.h^2 + (2+SQRT(2))*this.r^2)
+     this.I_0     = 1/3 * this.rho_b * this.l_b^3
+     this.alpha_1 = ATAN(SQRT(2)-1)
+     this.l_per   = (2*this.r) / (COS(this.alpha_1)+SIN(this.alpha_1))
+     this.l_v_1   = SQRT(this.h^2 + (2-SQRT(2))*this.r^2)
+     this.l_h_1   = SQRT(2)*this.r
+     this.l_u_l   = (2-SQRT(2))*this.l_h_1
+     this.l_u_s   = this.l_h_1 - this.l_u_l
+     this.l_u_l_0 = this.l_u_l / 3
+     this.l_h_0   = (2*this.l_u_l_0*this.l_h_1)/(this.l_u_l + this.l_u_l_0)
+     this.l_u_s_0 = this.l_h_0 * this.l_u_s / this.l_h_1
+     this.l_i_0   = ((this.l_h_1/this.l_h_0-1)/this.r + 1/this.l_v_1)^(-1)
+     this.Lx      = this.l_per*this.nx
+     this.Lz      = this.l_per*this.nz
+
+     bar_lambda_comp(this)   
+     B_con_comp(this)
+     T_con_comp(this)
+     LOOP FOR i = 1 TO this.n_P AND j = 1 TO 3 AND k = 1 TO 2
+          this.P_mat = 0
+     REPEAT
+     P_mat_comp(this)
+     LOOP FOR i = 0 TO this.nx_grid-1 AND j = 0 TO this.ny_grid-1
+        this.pan_ind_mat(i,j) = 1
+     REPEAT 
+     X_0_comp(this)
+     q_0_tilde_comp(this)
+    
+     this.q_tilde = this.q_0_tilde
+     this.X       = this.X_0
+END initilizeTensegrity
+
+! math_utils.h
+
+SUBROUTINE MatMult(ARRAY(*,*) OF REAL A; ARRAY(*,*) OF REAL B; ARRAY(*,*) OF REAL C^)
+    REAL sum
+    LOOP FOR i = 1 TO HI1(A)
+        LOOP FOR j = 1 TO HI2(B)
+            sum = 0
+            LOOP FOR k = 1 TO HI2(A)
+                sum = sum + A(i,k)*B(k,j)
+            REPEAT
+            C(i,j) = sum
+        REPEAT
+    REPEAT
+END MatMult
+
+SUBROUTINE MatDiff(ARRAY(*,*) OF REAL A; ARRAY(*,*) OF REAL B; ARRAY(*,*) OF REAL C^)
+    LOOP FOR i = 1 TO HI1(A)
+        LOOP FOR j = 1 TO HI2(B)
+            C(i,j) = A(i,j) - B(i,j)
+        REPEAT
+    REPEAT
+END MatDiff
+
+SUBROUTINE X_dot_comp(TENSEGRITY this^)
+
+    LOOP FOR i = 1 TO FLOOR((this.n_N-this.n_G)/2)
+        this.X_dot(3*i-2) = this.l_b*[COS(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*COS(this.q_tilde(2*i+(this.n_N-this.n_G)))*this.q_tilde(2*i-1)-SIN(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*SIN(this.q_tilde(2*i+(this.n_N-this.n_G)))*this.q_tilde(2*i)]
+        this.X_dot(3*i-1) = this.l_b*[COS(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*SIN(this.q_tilde(2*i+(this.n_N-this.n_G)))*this.q_tilde(2*i-1)+SIN(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*COS(this.q_tilde(2*i+(this.n_N-this.n_G)))*this.q_tilde(2*i)]
+        this.X_dot(3*i)   = -this.l_b*SIN(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*this.q_tilde(2*i-1)
+    REPEAT
+
+    LOOP FOR i = 1 TO this.n_G
+        this.ghost_ind  = this.ghost_nodes(i, 1)
+        this.parent_ind = this.ghost_nodes(i, 2)
+
+        this.X_dot(3*this.ghost_ind-2) = this.X_dot(3*this.parent_ind-2)
+        this.X_dot(3*this.ghost_ind-1) = this.X_dot(3*this.parent_ind-1)
+        this.X_dot(3*this.ghost_ind)   = this.X_dot(3*this.parent_ind)
+    REPEAT
+END X_dot_comp
+
+SUBROUTINE X_comp(TENSEGRITY this^)
+
+    !this.X = this.X_0
+
+    LOOP FOR i = 1 TO FLOOR((this.n_N-this.n_G)/2)
+        this.X(3*i-2) = this.X_0(3*i-2+3*FLOOR((this.n_N-this.n_G)/2)) + this.l_b*SIN(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*COS(this.q_tilde(2*i+(this.n_N-this.n_G)))
+        this.X(3*i-1) = this.X_0(3*i-1+3*FLOOR((this.n_N-this.n_G)/2)) + this.l_b*SIN(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*SIN(this.q_tilde(2*i+(this.n_N-this.n_G)))
+        this.X(3*i)   = this.X_0(3*i  +3*FLOOR((this.n_N-this.n_G)/2)) + this.l_b*COS(this.q_tilde(2*i-1+(this.n_N-this.n_G)))
+    REPEAT
+
+    LOOP FOR i = 1 TO this.n_G
+        this.ghost_ind  = this.ghost_nodes(i, 1)
+        this.parent_ind = this.ghost_nodes(i, 2)
+        this.per_dir    = this.ghost_nodes(i, 3)
+
+        IF this.per_dir = 1 THEN
+            this.X(3*this.ghost_ind-2) = this.X(3*this.parent_ind-2) - this.nx*this.l_per
+            this.X(3*this.ghost_ind-1) = this.X(3*this.parent_ind-1) 
+            this.X(3*this.ghost_ind)   = this.X(3*this.parent_ind)
+        ELSE IF this.per_dir = 2 THEN
+            this.X(3*this.ghost_ind-2) = this.X(3*this.parent_ind-2) 
+            this.X(3*this.ghost_ind-1) = this.X(3*this.parent_ind-1)
+            this.X(3*this.ghost_ind)   = this.X(3*this.parent_ind)   - this.nz*this.l_per
+        ELSE IF this.per_dir = 3 THEN
+            this.X(3*this.ghost_ind-2) = this.X(3*this.parent_ind-2) 
+            this.X(3*this.ghost_ind-1) = this.X(3*this.parent_ind-1)
+            this.X(3*this.ghost_ind)   = this.X(3*this.parent_ind)   + this.nz*this.l_per
+        ELSE IF this.per_dir = 4 THEN
+            this.X(3*this.ghost_ind-2) = this.X(3*this.parent_ind-2) + this.nx*this.l_per
+            this.X(3*this.ghost_ind-1) = this.X(3*this.parent_ind-1) 
+            this.X(3*this.ghost_ind)   = this.X(3*this.parent_ind)
+        END IF
+    REPEAT
+END X_comp
+
+SUBROUTINE df_comp(TENSEGRITY this^) 
+  REAL c = 2
+  REAL A = 150
+  INTEGER n_per = 6
+  REAL k_z = (2*PI*n_per)/(this.Lz)
+
+  REAL p = A*COS(k_z*(this.x(3)-c*this.time))
+  !REAL p = A
+  this.df(1) = -p*this.dA*this.normal(1)
+  this.df(2) = -p*this.dA*this.normal(2)
+  this.df(3) = -p*this.dA*this.normal(3)
+END df_comp
+
+SUBROUTINE f_ext_sub(TENSEGRITY this^)
+
+  this.f_ext = 0
+
+  this.d_lambda = 1 / (this.n_int-1)
+
+  LOOP FOR i = 1 TO this.n_P
+    this.ind_1 = this.P_mat(i, 1, 1)
+    this.ind_2 = this.P_mat(i, 2, 1)
+    this.ind_3 = this.P_mat(i, 3, 1)
+
+    this.X_1(1) = this.X(3*this.ind_1 - 2)
+    this.X_1(2) = this.X(3*this.ind_1 - 1)
+    this.X_1(3) = this.X(3*this.ind_1)
+
+    this.X_2(1) = this.X(3*this.ind_2 - 2)
+    this.X_2(2) = this.X(3*this.ind_2 - 1)
+    this.X_2(3) = this.X(3*this.ind_2)
+
+    this.X_3(1) = this.X(3*this.ind_3 - 2)
+    this.X_3(2) = this.X(3*this.ind_3 - 1)
+    this.X_3(3) = this.X(3*this.ind_3)
+
+    CASE this.P_mat(i, 1, 2) OF
+        1:
+            this.X_1(1) = this.X_1(1) - this.Lx
+            this.X_1(3) = this.X_1(3) - this.Lz
+        2:
+            this.X_1(3) = this.X_1(3) - this.Lz
+        3:
+            this.X_1(1) = this.X_1(1) - this.Lx
+        4:
+            this.X_1(1) = this.X_1(1) - this.Lx
+            this.X_1(3) = this.X_1(3) + this.Lz
+        5:
+            this.X_1(3) = this.X_1(3) + this.Lz
+        6:
+            this.X_1(1) = this.X_1(1) + this.Lx
+            this.X_1(3) = this.X_1(3) - this.Lz
+        7:
+            this.X_1(1) = this.X_1(1) + this.Lx
+        8:
+            this.X_1(1) = this.X_1(1) + this.Lx
+            this.X_1(3) = this.X_1(3) + this.Lz
+    END CASE
+
+    CASE this.P_mat(i, 2, 2) OF
+        1:
+            this.X_2(1) = this.X_2(1) - this.Lx
+            this.X_2(3) = this.X_2(3) - this.Lz
+        2:
+            this.X_2(3) = this.X_2(3) - this.Lz
+        3:
+            this.X_2(1) = this.X_2(1) - this.Lx
+        4:
+            this.X_2(1) = this.X_2(1) - this.Lx
+            this.X_2(3) = this.X_2(3) + this.Lz
+        5:
+            this.X_2(3) = this.X_2(3) + this.Lz
+        6:
+            this.X_2(1) = this.X_2(1) + this.Lx
+            this.X_2(3) = this.X_2(3) - this.Lz
+        7:
+            this.X_2(1) = this.X_2(1) + this.Lx
+        8:
+            this.X_2(1) = this.X_2(1) + this.Lx
+            this.X_2(3) = this.X_2(3) + this.Lz
+    END CASE
+
+    CASE this.P_mat(i, 3, 2) OF
+        1:
+            this.X_3(1) = this.X_3(1) - this.Lx
+            this.X_3(3) = this.X_3(3) - this.Lz
+        2:
+            this.X_3(3) = this.X_3(3) - this.Lz
+        3:
+            this.X_3(1) = this.X_3(1) - this.Lx
+        4:
+            this.X_3(1) = this.X_3(1) - this.Lx
+            this.X_3(3) = this.X_3(3) + this.Lz
+        5:
+            this.X_3(3) = this.X_3(3) + this.Lz
+        6:
+            this.X_3(1) = this.X_3(1) + this.Lx
+            this.X_3(3) = this.X_3(3) - this.Lz
+        7:
+            this.X_3(1) = this.X_3(1) + this.Lx
+        8:
+            this.X_3(1) = this.X_3(1) + this.Lx
+            this.X_3(3) = this.X_3(3) + this.Lz
+    END CASE
+
+    this.dir_1(1) = this.X_2(1) - this.X_1(1)
+    this.dir_1(2) = this.X_2(2) - this.X_1(2)
+    this.dir_1(3) = this.X_2(3) - this.X_1(3)
+
+    this.dir_2(1) = this.X_3(1) - this.X_1(1)
+    this.dir_2(2) = this.X_3(2) - this.X_1(2)
+    this.dir_2(3) = this.X_3(3) - this.X_1(3)
+    
+    this.normal(1) = this.dir_1(2)*this.dir_2(3) - this.dir_2(2)*this.dir_1(3)
+    this.normal(2) = this.dir_2(1)*this.dir_1(3) - this.dir_1(1)*this.dir_2(3)
+    this.normal(3) = this.dir_1(1)*this.dir_2(2) - this.dir_2(1)*this.dir_1(2)
+
+    this.normal_norm = SQRT(this.normal(1)^2 + this.normal(2)^2 + this.normal(3)^2)
+    
+    this.dA = (this.normal_norm / 2) / (this.n_int-1)^2
+
+    LOOP FOR k = 1 TO 3
+      this.normal(k) = this.normal(k) / this.normal_norm
+    REPEAT
+
+    LOOP FOR j = 1 TO (this.n_int-1)^2
+      this.lambda_1 = this.bar_lambda_mat(j, 1)
+      this.lambda_2 = this.bar_lambda_mat(j, 2)
+      this.lambda_3 = this.bar_lambda_mat(j, 3)
+
+      this.x(1) = this.lambda_1*this.X_1(1) + this.lambda_2*this.X_2(1) + this.lambda_3*this.X_3(1)
+      this.x(2) = this.lambda_1*this.X_1(2) + this.lambda_2*this.X_2(2) + this.lambda_3*this.X_3(2)
+      this.x(3) = this.lambda_1*this.X_1(3) + this.lambda_2*this.X_2(3) + this.lambda_3*this.X_3(3)
+
+      df_comp(this)
+
+      IF this.P_mat(i, 1, 2) = 0 AND this.ind_1 <= this.n_B THEN
+        this.f_ext(3*this.ind_1-2) = this.f_ext(3*this.ind_1-2) + this.lambda_1*this.df(1)
+        this.f_ext(3*this.ind_1-1) = this.f_ext(3*this.ind_1-1) + this.lambda_1*this.df(2)
+        this.f_ext(3*this.ind_1)   = this.f_ext(3*this.ind_1)   + this.lambda_1*this.df(3)
+      END IF
+      IF this.P_mat(i, 2, 2) = 0 AND this.ind_2 <= this.n_B THEN
+        this.f_ext(3*this.ind_2-2) = this.f_ext(3*this.ind_2-2) + this.lambda_2*this.df(1)
+        this.f_ext(3*this.ind_2-1) = this.f_ext(3*this.ind_2-1) + this.lambda_2*this.df(2)
+        this.f_ext(3*this.ind_2)   = this.f_ext(3*this.ind_2)   + this.lambda_2*this.df(3)
+      END IF
+      IF this.P_mat(i, 3, 2) = 0 AND this.ind_3 <= this.n_B THEN
+        this.f_ext(3*this.ind_3-2) = this.f_ext(3*this.ind_3-2) + this.lambda_3*this.df(1)
+        this.f_ext(3*this.ind_3-1) = this.f_ext(3*this.ind_3-1) + this.lambda_3*this.df(2)
+        this.f_ext(3*this.ind_3)   = this.f_ext(3*this.ind_3)   + this.lambda_3*this.df(3)
+      END IF
+    REPEAT
+  REPEAT
+END f_ext_sub
+
+
+SUBROUTINE B_con_comp(TENSEGRITY this^)
+    
+    LOOP FOR i = 1 TO this.n_C
+        this.B_con(4*i-3, 1) = 4*this.n_C+1 + 4*(i-1)
+        this.B_con(4*i-3, 2) = 1 + 4*(i-1)
+        this.B_con(4*i-2, 1) = 4*this.n_C+2 + 4*(i-1)
+        this.B_con(4*i-2, 2) = 2 + 4*(i-1)
+        this.B_con(4*i-1, 1) = 4*this.n_C+3 + 4*(i-1)
+        this.B_con(4*i-1, 2) = 3 + 4*(i-1)
+        this.B_con(4*i, 1)   = 4*this.n_C+4 + 4*(i-1)
+        this.B_con(4*i, 2)   = 4 + 4*(i-1)
+    REPEAT
+END B_con_comp 
+
+
+SUBROUTINE T_con_comp(TENSEGRITY this^)
+
+    ARRAY(this.n_C, 10) OF INTEGER Ten_cell_up
+
+    LOOP FOR j = 1 TO this.nx AND i = 1 TO this.nz
+
+        ind = FLOOR(i+this.nz*(j-1))
+        
+        Ten_cell_up(ind, 1) = FLOOR(4*(i+(j-1)*this.nz)-3)
+        Ten_cell_up(ind, 2) = FLOOR(4*(i+(j-1)*this.nz)-2)
+        Ten_cell_up(ind, 3) = FLOOR(4*(i+(j-1)*this.nz)-1)
+        Ten_cell_up(ind, 4) = FLOOR(4*(i+(j-1)*this.nz))
+
+        IF NOT(i MOD this.nz=0) THEN
+            Ten_cell_up(ind, 5) = FLOOR(i+(j-1)*this.nz+1)
+        END IF
+
+        IF NOT(j MOD this.nx=0) THEN
+            Ten_cell_up(ind, 6) = FLOOR(i+j*this.nz)
+        END IF
+
+        IF j = 1 THEN
+            Ten_cell_up(ind, 7) = FLOOR(i+this.nz*(this.nx-1))
+        END IF
+
+        IF i = 1 THEN
+            Ten_cell_up(ind, 8) = FLOOR(this.nz+this.nz*(j-1))
+        END IF
+
+        IF i = this.nz THEN
+            Ten_cell_up(ind, 9) = FLOOR(1+this.nz*(j-1))
+        END IF
+
+        IF j = this.nx THEN 
+            Ten_cell_up(ind, 10) = i
+        END IF
+    REPEAT
+
+    INTEGER count_1 = 0
+
+    LOOP FOR i = 1 TO FLOOR(this.nx*this.nz)
+
+        r_con = Ten_cell_up(i, 5)
+        u_con = Ten_cell_up(i, 6)
+
+        IF NOT(r_con = 0) THEN
+            count_1 = count_1 + 1
+
+            this.T_con(3*count_1-2, 1) = Ten_cell_up(i, 2)
+            this.T_con(3*count_1-2, 2) = Ten_cell_up(r_con, 1)
+            this.T_con(3*count_1-1, 1) = Ten_cell_up(r_con, 1)
+            this.T_con(3*count_1-1, 2) = Ten_cell_up(i, 3)
+            this.T_con(3*count_1, 1)   = Ten_cell_up(i, 3)
+            this.T_con(3*count_1, 2)   = Ten_cell_up(r_con, 4)
+
+            this.l_0(3*count_1-2) = this.l_u_s_0
+            this.l_0(3*count_1-1) = this.l_u_l_0
+            this.l_0(3*count_1)   = this.l_u_s_0
+        END IF
+        IF NOT(u_con = 0) THEN
+            count_1 = count_1 + 1
+
+            this.T_con(3*count_1-2, 1) = Ten_cell_up(u_con, 1)
+            this.T_con(3*count_1-2, 2) = Ten_cell_up(i, 4)
+            this.T_con(3*count_1-1, 1) = Ten_cell_up(i, 4)
+            this.T_con(3*count_1-1, 2) = Ten_cell_up(u_con, 2)
+            this.T_con(3*count_1, 1)   = Ten_cell_up(u_con, 2)
+            this.T_con(3*count_1, 2)   = Ten_cell_up(i, 3)
+
+            this.l_0(3*count_1-2) = this.l_u_s_0
+            this.l_0(3*count_1-1) = this.l_u_l_0
+            this.l_0(3*count_1)   = this.l_u_s_0
+        END IF
+    REPEAT
+
+    INTEGER count_2 = 0
+    INTEGER count_g = 0
+
+    LOOP FOR i = 1 TO this.nz
+        count_g             = count_g + 1
+        count_2             = count_2 + 1
+        ghost_down_cell_ind = Ten_cell_up(i, 7)
+        ghost_node          = 8*this.nx*this.nz + count_g
+
+        this.T_con(2*count_2-1+3*count_1, 1) = Ten_cell_up(i, 1)
+        this.T_con(2*count_2-1+3*count_1, 2) = ghost_node
+        this.T_con(2*count_2+3*count_1, 1)   = ghost_node
+        this.T_con(2*count_2+3*count_1, 2)   = Ten_cell_up(i, 2)
+
+        this.l_0(2*count_2-1+3*count_1) = this.l_u_s_0
+        this.l_0(2*count_2+3*count_1)   = this.l_u_l_0
+
+        this.ghost_nodes(count_g, 1) = ghost_node
+        this.ghost_nodes(count_g, 2) = Ten_cell_up(ghost_down_cell_ind, 4)
+        this.ghost_nodes(count_g, 3) = 1
+    REPEAT
+
+    LOOP FOR i = 1 TO this.nx
+        count_g = count_g + 1
+        count_2 = count_2 + 1
+
+        j = 1 + (i-1)*this.nz
+
+        ghost_left_cell_ind = Ten_cell_up(j, 8)
+        ghost_node          = 8*this.nx*this.nz + count_g
+
+        this.T_con(2*count_2-1+3*count_1, 1) = Ten_cell_up(j, 4)
+        this.T_con(2*count_2-1+3*count_1, 2) = ghost_node
+        this.T_con(2*count_2+3*count_1, 1)   = ghost_node
+        this.T_con(2*count_2+3*count_1, 2)   = Ten_cell_up(j, 1)
+
+        this.l_0(2*count_2-1+3*count_1) = this.l_u_s_0
+        this.l_0(2*count_2+3*count_1)   = this.l_u_l_0
+
+        this.ghost_nodes(count_g, 1) = ghost_node
+        this.ghost_nodes(count_g, 2) = Ten_cell_up(ghost_left_cell_ind, 3)
+        this.ghost_nodes(count_g, 3) = 2
+    REPEAT
+
+    INTEGER count_3 = 0
+
+    LOOP FOR i = 1 TO this.nx
+        count_g = count_g + 1
+        count_3 = count_3 + 1
+
+        j = i*this.nz
+
+        ghost_right_cell_ind = Ten_cell_up(j, 9)
+        ghost_node           = 8*this.nx*this.nz + count_g
+
+        this.T_con(count_3+2*count_2+3*count_1, 1) = ghost_node
+        this.T_con(count_3+2*count_2+3*count_1, 2) = Ten_cell_up(j, 2)
+
+        this.l_0(count_3+2*count_2+3*count_1) = this.l_u_s_0
+
+        this.ghost_nodes(count_g, 1) = ghost_node
+        this.ghost_nodes(count_g, 2) = Ten_cell_up(ghost_right_cell_ind, 1)
+        this.ghost_nodes(count_g, 3) = 3
+    REPEAT
+
+    LOOP FOR i = 1 TO this.nz
+        count_g = count_g + 1
+        count_3 = count_3 + 1
+
+        j = i + (this.nx-1)*this.nz
+
+        ghost_up_cell_ind = Ten_cell_up(j, 10)
+        ghost_node        = 8*this.nx*this.nz + count_g
+
+        this.T_con(count_3+2*count_2+3*count_1, 1) = ghost_node
+        this.T_con(count_3+2*count_2+3*count_1, 2) = Ten_cell_up(j, 3)
+
+        this.l_0(count_3+2*count_2+3*count_1) = this.l_u_s_0
+
+        this.ghost_nodes(count_g, 1) = ghost_node
+        this.ghost_nodes(count_g, 2) = Ten_cell_up(ghost_up_cell_ind, 2)
+        this.ghost_nodes(count_g, 3) = 4
+    REPEAT
+
+    INTEGER count_4 = 0
+
+    LOOP FOR i = 1 TO this.nx*this.nz
+        count_4 = count_4 + 1
+
+        this.T_con(4*count_4-3+3*count_1+2*count_2+count_3, 1) = 4*this.nx*this.nz + 1 + 4*(i-1)
+        this.T_con(4*count_4-3+3*count_1+2*count_2+count_3, 2) = 4 + 4*(i-1)
+        this.T_con(4*count_4-2+3*count_1+2*count_2+count_3, 1) = 4*this.nx*this.nz + 2 + 4*(i-1)
+        this.T_con(4*count_4-2+3*count_1+2*count_2+count_3, 2) = 1 + 4*(i-1)
+        this.T_con(4*count_4-1+3*count_1+2*count_2+count_3, 1) = 4*this.nx*this.nz + 3 + 4*(i-1)
+        this.T_con(4*count_4-1+3*count_1+2*count_2+count_3, 2) = 2 + 4*(i-1)
+        this.T_con(4*count_4+3*count_1+2*count_2+count_3, 1)   = 4*this.nx*this.nz + 4 + 4*(i-1)
+        this.T_con(4*count_4+3*count_1+2*count_2+count_3, 2)   = 3 + 4*(i-1)
+
+        this.l_0(4*count_4-3+3*count_1+2*count_2+count_3) = this.l_i_0
+        this.l_0(4*count_4-2+3*count_1+2*count_2+count_3) = this.l_i_0
+        this.l_0(4*count_4-1+3*count_1+2*count_2+count_3) = this.l_i_0
+        this.l_0(4*count_4+3*count_1+2*count_2+count_3)   = this.l_i_0
+    REPEAT
+END T_con_comp 
+
+
+SUBROUTINE f_n_comp(TENSEGRITY this^)
+
+    this.f_n = 0
+    this.f_n_ghost = 0
+    
+    LOOP FOR i = 1 TO this.n_T
+        this.ind_A = this.T_con(i, 1)
+        this.ind_B = this.T_con(i, 2)
+
+        this.l_i(1) = this.X(3*this.ind_B-2) - this.X(3*this.ind_A-2)
+        this.l_i(2) = this.X(3*this.ind_B-1) - this.X(3*this.ind_A-1)
+        this.l_i(3) = this.X(3*this.ind_B)   - this.X(3*this.ind_A)
+        
+        this.l_i_dot(1) = this.X_dot(3*this.ind_B-2) - this.X_dot(3*this.ind_A-2)
+        this.l_i_dot(2) = this.X_dot(3*this.ind_B-1) - this.X_dot(3*this.ind_A-1)
+        this.l_i_dot(3) = this.X_dot(3*this.ind_B)   - this.X_dot(3*this.ind_A)
+
+        this.l_i_norm = SQRT(this.l_i(1)^2+this.l_i(2)^2+this.l_i(3)^2)
+
+        IF this.l_i_norm >= this.l_0(i) THEN
+            this.f_t(1) = this.k/this.l_0(i)*(this.l_i_norm - this.l_0(i))*this.l_i(1)/this.l_i_norm + this.sigma*this.l_i_dot(1)
+            this.f_t(2) = this.k/this.l_0(i)*(this.l_i_norm - this.l_0(i))*this.l_i(2)/this.l_i_norm + this.sigma*this.l_i_dot(2)
+            this.f_t(3) = this.k/this.l_0(i)*(this.l_i_norm - this.l_0(i))*this.l_i(3)/this.l_i_norm + this.sigma*this.l_i_dot(3)
+        ELSE
+            this.f_t(1) = 0
+            this.f_t(2) = 0
+            this.f_t(3) = 0
+        END IF
+
+        IF this.ind_A <= (this.n_N-this.n_G)/2 THEN
+            this.f_n(3*this.ind_A-2) = this.f_n(3*this.ind_A-2) + this.f_t(1)
+            this.f_n(3*this.ind_A-1) = this.f_n(3*this.ind_A-1) + this.f_t(2)
+            this.f_n(3*this.ind_A)   = this.f_n(3*this.ind_A) + this.f_t(3)
+        ELSE IF this.ind_A > this.n_N-this.n_G THEN
+            this.ind_G = this.ind_A - (this.n_N-this.n_G)
+
+            this.f_n_ghost(3*this.ind_G-2) = this.f_n_ghost(3*this.ind_G-2) + this.f_t(1)
+            this.f_n_ghost(3*this.ind_G-1) = this.f_n_ghost(3*this.ind_G-1) + this.f_t(2)
+            this.f_n_ghost(3*this.ind_G)   = this.f_n_ghost(3*this.ind_G) + this.f_t(3)
+        END IF
+
+        IF this.ind_B <= (this.n_N-this.n_G)/2 THEN
+            this.f_n(3*this.ind_B-2) = this.f_n(3*this.ind_B-2) - this.f_t(1)
+            this.f_n(3*this.ind_B-1) = this.f_n(3*this.ind_B-1) - this.f_t(2)
+            this.f_n(3*this.ind_B)   = this.f_n(3*this.ind_B) - this.f_t(3)
+        ELSE IF this.ind_B > this.n_N-this.n_G THEN
+            this.ind_G = this.ind_B - (this.n_N-this.n_G)
+
+            this.f_n_ghost(3*this.ind_G-2) = this.f_n_ghost(3*this.ind_G-2) - this.f_t(1)
+            this.f_n_ghost(3*this.ind_G-1) = this.f_n_ghost(3*this.ind_G-1) - this.f_t(2)
+            this.f_n_ghost(3*this.ind_G)   = this.f_n_ghost(3*this.ind_G) - this.f_t(3)
+        END IF
+    REPEAT
+    
+    LOOP FOR i = 1 TO this.n_G
+        this.parent_ind = this.ghost_nodes(i, 2)
+
+        this.f_n(3*this.parent_ind-2) = this.f_n(3*this.parent_ind-2) + this.f_n_ghost(3*i-2)
+        this.f_n(3*this.parent_ind-1) = this.f_n(3*this.parent_ind-1) + this.f_n_ghost(3*i-1)
+        this.f_n(3*this.parent_ind)   = this.f_n(3*this.parent_ind) + this.f_n_ghost(3*i)
+    REPEAT
+END f_n_comp
+
+
+SUBROUTINE Cq_dot_compute(TENSEGRITY this^)
+
+    LOOP FOR i = 1 TO this.n_B
+        this.Cq_dot(2*i-1) = -0.5*this.I_0*SIN(2*this.q_tilde(2*i-1+FLOOR(this.n_q_tilde/2)))*this.q_tilde(2*i)^2
+        this.Cq_dot(2*i)   = this.I_0*SIN(2*this.q_tilde(2*i-1+FLOOR(this.n_q_tilde/2)))*this.q_tilde(2*i-1)*this.q_tilde(2*i)
+    REPEAT
+END Cq_dot_compute
+
+
+SUBROUTINE f_mom_comp(TENSEGRITY this^)
+
+    LOOP FOR i = 1 TO FLOOR(this.n_q/2)
+        this.f_mom(2*i-1) = this.l_b*[COS(this.q_tilde(2*i-1+this.n_q))*COS(this.q_tilde(2*i+this.n_q))*this.f_n(3*i-2) + COS(this.q_tilde(2*i-1+this.n_q))*SIN(this.q_tilde(2*i+this.n_q))*this.f_n(3*i-1) - SIN(this.q_tilde(2*i-1+this.n_q))*this.f_n(3*i)]
+        this.f_mom(2*i)   = this.l_b*[-SIN(this.q_tilde(2*i-1+this.n_q))*SIN(this.q_tilde(2*i+this.n_q))*this.f_n(3*i-2) + SIN(this.q_tilde(2*i-1+this.n_q))*COS(this.q_tilde(2*i+this.n_q))*this.f_n(3*i-1)]
+    REPEAT
+END f_mom_comp
+
+
+SUBROUTINE P_mat_comp(TENSEGRITY this^)
+
+    INTEGER ghost_ind = 0
+    INTEGER floor_ind = 0
+
+    LOOP FOR j = 1 TO this.nx
+        LOOP FOR i = 1 TO this.nz
+            ind = i + (j-1)*this.nz
+
+            IF i = 1 AND j = 1 THEN
+                this.P_mat(1+floor_ind, 1, 1) = 1
+                this.P_mat(1+floor_ind, 2, 1) = this.ghost_nodes(1, 1)
+                this.P_mat(1+floor_ind, 3, 1) = this.ghost_nodes(this.nz+1, 1)
+
+                this.P_mat(2+floor_ind, 1, 1) = this.ghost_nodes(1, 1)
+                this.P_mat(2+floor_ind, 2, 1) = 4*(this.nz+1) - 2
+                this.P_mat(2+floor_ind, 3, 1) = this.ghost_nodes(this.nz+1, 1)
+
+                this.P_mat(3+floor_ind, 1, 1) = this.ghost_nodes(1, 1)
+                this.P_mat(3+floor_ind, 2, 1) = 4*2 - 3
+                this.P_mat(3+floor_ind, 3, 1) = 4*(this.nz+1) - 2
+
+                this.P_mat(4+floor_ind, 1, 1) = this.ghost_nodes(1, 1)
+                this.P_mat(4+floor_ind, 2, 1) = 2
+                this.P_mat(4+floor_ind, 3, 1) = 4*2 - 3
+
+                this.P_mat(5+floor_ind, 1, 1) = this.ghost_nodes(this.nz+1, 1)
+                this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz+1) - 2
+                this.P_mat(5+floor_ind, 3, 1) = 4
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(this.nz+1) - 2
+                this.P_mat(6+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(6+floor_ind, 3, 1) = 3
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i > 1 AND i < this.nz AND j = 1 THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(1+floor_ind, 2, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(1+floor_ind, 3, 1) = 4*(ind-1) - 1
+
+                this.P_mat(2+floor_ind, 1, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(2+floor_ind, 3, 1) = 4*(ind-1) - 1
+
+                this.P_mat(3+floor_ind, 1, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(3+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(3+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(4+floor_ind, 1, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(4+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(4+floor_ind, 3, 1) = 4*(ind+1) - 3
+
+                this.P_mat(5+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(5+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(5+floor_ind, 3, 1) = 4*ind
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(6+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(6+floor_ind, 3, 1) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i = this.nz AND j = 1 THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(1+floor_ind, 2, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(1+floor_ind, 3, 1) = 4*(ind-1) - 1
+
+                this.P_mat(2+floor_ind, 1, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(2+floor_ind, 3, 1) = 4*(ind-1) - 1
+
+                this.P_mat(3+floor_ind, 1, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(3+floor_ind, 2, 1) = this.ghost_nodes(this.nz+this.nx+1, 1)
+                this.P_mat(3+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(4+floor_ind, 1, 1) = this.ghost_nodes(i, 1)
+                this.P_mat(4+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(4+floor_ind, 3, 1) = this.ghost_nodes(this.nz+this.nx+1, 1)
+
+                this.P_mat(5+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(5+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(5+floor_ind, 3, 1) = 4*ind
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(6+floor_ind, 2, 1) = this.ghost_nodes(this.nz+this.nx+1, 1)
+                this.P_mat(6+floor_ind, 3, 1) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i = 1 AND j > 1 AND j < this.nx THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(1+floor_ind, 2, 1) = 4*(ind-this.nz)
+                this.P_mat(1+floor_ind, 3, 1) = this.ghost_nodes(this.nz+j, 1)
+
+                this.P_mat(2+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(2+floor_ind, 3, 1) = this.ghost_nodes(this.nz+j, 1)
+
+                this.P_mat(3+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(3+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(3+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(4+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(4+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(4+floor_ind, 3, 1) = 4*(ind+1) - 3
+
+                this.P_mat(5+floor_ind, 1, 1) = this.ghost_nodes(this.nz+j, 1)
+                this.P_mat(5+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(5+floor_ind, 3, 1) = 4*ind
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(6+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(6+floor_ind, 3, 1) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF j > 1 AND j < this.nx AND i > 1 AND i < this.nz THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*(ind-1) - 2
+                this.P_mat(1+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(1+floor_ind, 3, 1) = 4*ind - 3
+
+                this.P_mat(2+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(2+floor_ind, 3, 1) = 4*(ind-this.nz)
+
+                this.P_mat(3+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(3+floor_ind, 2, 1) = 4*ind - 3
+                this.P_mat(3+floor_ind, 3, 1) = 4*(ind-this.nz)
+
+                this.P_mat(4+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(4+floor_ind, 2, 1) = 4*(ind-this.nz)
+                this.P_mat(4+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(5+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(5+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(5+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(6+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(6+floor_ind, 3, 1) = 4*(ind+1) - 3
+
+                this.P_mat(7+floor_ind, 1, 1) = 4*ind
+                this.P_mat(7+floor_ind, 2, 1) = 4*(ind-1) - 1
+                this.P_mat(7+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(8+floor_ind, 1, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(8+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(8+floor_ind, 3, 1) = 4*ind - 1
+
+                floor_ind = 8 + floor_ind
+            END IF
+
+            IF i = this.nz AND j > 1 AND j < this.nx THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*(ind-1) - 2
+                this.P_mat(1+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(1+floor_ind, 3, 1) = 4*ind - 3
+
+                this.P_mat(2+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(2+floor_ind, 3, 1) = 4*(ind-this.nz)
+
+                this.P_mat(3+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(3+floor_ind, 2, 1) = 4*ind - 3
+                this.P_mat(3+floor_ind, 3, 1) = 4*(ind-this.nz)
+
+                this.P_mat(4+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(4+floor_ind, 2, 1) = 4*(ind-this.nz)
+                this.P_mat(4+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(5+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(5+floor_ind, 2, 1) = this.ghost_nodes(this.nz+this.nx+j, 1)
+                this.P_mat(5+floor_ind, 3, 1) = 4*(ind+this.nz) - 2
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(6+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(6+floor_ind, 3, 1) = this.ghost_nodes(this.nz+this.nx+j, 1)
+
+                this.P_mat(7+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(7+floor_ind, 2, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(7+floor_ind, 3, 1) = 4*ind
+
+                this.P_mat(8+floor_ind, 1, 1) = 4*(ind+this.nz) - 2
+                this.P_mat(8+floor_ind, 2, 1) = this.ghost_nodes(this.nz+this.nx+j, 1)
+                this.P_mat(8+floor_ind, 3, 1) = 4*ind - 1
+
+                floor_ind = 8 + floor_ind
+            END IF
+
+            IF i = 1 AND j = this.nx THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(1+floor_ind, 2, 1) = 4*(ind-this.nz)
+                this.P_mat(1+floor_ind, 3, 1) = this.ghost_nodes(this.nz+this.nx, 1)
+
+                this.P_mat(2+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(2+floor_ind, 2, 1) = this.ghost_nodes(this.nz+2*this.nx+1, 1)
+                this.P_mat(2+floor_ind, 3, 1) = this.ghost_nodes(this.nz+this.nx, 1)
+
+                this.P_mat(3+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(3+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(3+floor_ind, 3, 1) = this.ghost_nodes(this.nz+2*this.nx+1, 1)
+
+                this.P_mat(4+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(4+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(4+floor_ind, 3, 1) = 4*(ind+1) - 3
+
+                this.P_mat(5+floor_ind, 1, 1) = this.ghost_nodes(this.nz+this.nx, 1)
+                this.P_mat(5+floor_ind, 2, 1) = this.ghost_nodes(this.nz+2*this.nx+1, 1)
+                this.P_mat(5+floor_ind, 3, 1) = 4*ind
+
+                this.P_mat(6+floor_ind, 1, 1) = this.ghost_nodes(this.nz+2*this.nx+1, 1)
+                this.P_mat(6+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(6+floor_ind, 3, 1) = 4*ind - 1
+
+                floor_ind = floor_ind + 6
+            END IF
+
+            IF i > 1 AND i < this.nz AND j = this.nx THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*(ind-1) - 2
+                this.P_mat(1+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(1+floor_ind, 3, 1) = 4*ind - 3
+
+                this.P_mat(2+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(2+floor_ind, 3, 1) = 4*(ind-this.nz)
+
+                this.P_mat(3+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(3+floor_ind, 2, 1) = 4*(ind-1) - 1
+                this.P_mat(3+floor_ind, 3, 1) = 4*ind - 3
+
+                this.P_mat(4+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(4+floor_ind, 2, 1) = 4*(ind-this.nz)
+                this.P_mat(4+floor_ind, 3, 1) = this.ghost_nodes(this.nz+2*this.nx+i, 1)
+
+                this.P_mat(5+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(5+floor_ind, 2, 1) = 4*(ind+1) - 3
+                this.P_mat(5+floor_ind, 3, 1) = this.ghost_nodes(this.nz+2*this.nx+i, 1)
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(6+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(6+floor_ind, 3, 1) = 4*(ind+1) - 3
+
+                this.P_mat(7+floor_ind, 1, 1) = 4*ind
+                this.P_mat(7+floor_ind, 2, 1) = 4*(ind-1) - 1
+                this.P_mat(7+floor_ind, 3, 1) = this.ghost_nodes(this.nz+2*this.nx+i, 1)
+
+                this.P_mat(8+floor_ind, 1, 1) = 4*(ind+1) - 3
+                this.P_mat(8+floor_ind, 2, 1) = 4*ind - 1
+                this.P_mat(8+floor_ind, 3, 1) = this.ghost_nodes(this.nz+2*this.nx+i, 1)
+
+                floor_ind = 8 + floor_ind
+            END IF
+
+            IF i = this.nz AND j = this.nx THEN
+                this.P_mat(1+floor_ind, 1, 1) = 4*(ind-1) - 2
+                this.P_mat(1+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(1+floor_ind, 3, 1) = 4*ind - 3
+
+                this.P_mat(2+floor_ind, 1, 1) = 4*ind - 3
+                this.P_mat(2+floor_ind, 2, 1) = 4*(ind-1-this.nz) - 1
+                this.P_mat(2+floor_ind, 3, 1) = 4*(ind-this.nz)
+
+                this.P_mat(3+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(3+floor_ind, 2, 1) = 4*(ind-1) - 1
+                this.P_mat(3+floor_ind, 3, 1) = 4*ind - 3
+
+                this.P_mat(4+floor_ind, 1, 1) = 4*(ind-1) - 1
+                this.P_mat(4+floor_ind, 2, 1) = 4*(ind-this.nz)
+                this.P_mat(4+floor_ind, 3, 1) = this.ghost_nodes(2*this.nz+2*this.nx, 1)
+
+                this.P_mat(5+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(5+floor_ind, 2, 1) = this.ghost_nodes(this.nz+2*this.nx, 1)
+                this.P_mat(5+floor_ind, 3, 1) = this.ghost_nodes(2*this.nz+2*this.nx, 1)
+
+                this.P_mat(6+floor_ind, 1, 1) = 4*(ind-this.nz)
+                this.P_mat(6+floor_ind, 2, 1) = 4*ind - 2
+                this.P_mat(6+floor_ind, 3, 1) = this.ghost_nodes(this.nz+2*this.nx, 1)
+
+                this.P_mat(7+floor_ind, 1, 1) = 4*ind
+                this.P_mat(7+floor_ind, 2, 1) = 4*(ind-1) - 1
+                this.P_mat(7+floor_ind, 3, 1) = this.ghost_nodes(2*this.nz+2*this.nx, 1)
+
+                this.P_mat(8+floor_ind, 1, 1) = this.ghost_nodes(this.nz+2*this.nx, 1)
+                this.P_mat(8+floor_ind, 2, 1) = 4*ind - 1
+                this.P_mat(8+floor_ind, 3, 1) = this.ghost_nodes(2*this.nz+2*this.nx, 1)
+
+                floor_ind = 8 + floor_ind
+            END IF
+        REPEAT
+    REPEAT
+
+    ! Patch periodiche
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*((this.nx-1)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 1
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz + (this.nx-1)*this.nz-1) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 1
+    this.P_mat(1+floor_ind, 3, 1) = 4*(this.nz + (this.nx-1)*this.nz) - 3
+    this.P_mat(1+floor_ind, 3, 2) = 1
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz*this.nx-1) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 1
+    this.P_mat(2+floor_ind, 2, 1) = 4*((this.nx-1)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 1
+    this.P_mat(2+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(2+floor_ind, 3, 2) = 2
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*((this.nx-1)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 1
+    this.P_mat(3+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(3+floor_ind, 2, 2) = 3
+    this.P_mat(3+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(3+floor_ind, 3, 2) = 2
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*((this.nx-1)*this.nz)
+    this.P_mat(4+floor_ind, 1, 2) = 1
+    this.P_mat(4+floor_ind, 2, 1) = 4*this.nz*this.nx - 2
+    this.P_mat(4+floor_ind, 2, 2) = 1
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(4+floor_ind, 3, 2) = 3
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*this.nz*this.nx
+    this.P_mat(5+floor_ind, 1, 2) = 1 
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz + (this.nx-1)*this.nz-1) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 1
+    this.P_mat(5+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(5+floor_ind, 3, 2) = 2
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(6+floor_ind, 1, 2) = 2
+    this.P_mat(6+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(6+floor_ind, 2, 2) = 3
+    this.P_mat(6+floor_ind, 3, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(6+floor_ind, 3, 2) = 1
+
+    this.P_mat(7+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(7+floor_ind, 1, 2) = 2
+    this.P_mat(7+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(7+floor_ind, 2, 2) = 1
+    this.P_mat(7+floor_ind, 3, 1) = 1
+    this.P_mat(7+floor_ind, 3, 2) = 0
+
+    this.P_mat(8+floor_ind, 1, 1) = 1
+    this.P_mat(8+floor_ind, 1, 2) = 0
+    this.P_mat(8+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(8+floor_ind, 2, 2) = 1
+    this.P_mat(8+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(8+floor_ind, 3, 2) = 3
+
+    floor_ind = floor_ind + 8
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 3
+    this.P_mat(1+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(1+floor_ind, 2, 2) = 1
+    this.P_mat(1+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(1+floor_ind, 3, 2) = 3
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(2+floor_ind, 1, 2) = 1
+    this.P_mat(2+floor_ind, 2, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 3
+    this.P_mat(2+floor_ind, 3, 1) = 2
+    this.P_mat(2+floor_ind, 3, 2) = 0
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 3
+    this.P_mat(3+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(3+floor_ind, 2, 2) = 3
+    this.P_mat(3+floor_ind, 3, 1) = 2
+    this.P_mat(3+floor_ind, 3, 2) = 0
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz) - 2
+    this.P_mat(4+floor_ind, 1, 2) = 3
+    this.P_mat(4+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(4+floor_ind, 2, 2) = 3
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 3
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(5+floor_ind, 1, 2) = 3
+    this.P_mat(5+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(5+floor_ind, 2, 2) = 1
+    this.P_mat(5+floor_ind, 3, 1) = 2
+    this.P_mat(5+floor_ind, 3, 2) = 0
+
+    this.P_mat(6+floor_ind, 1, 1) = 2
+    this.P_mat(6+floor_ind, 1, 2) = 0
+    this.P_mat(6+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(6+floor_ind, 2, 2) = 3
+    this.P_mat(6+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(6+floor_ind, 3, 2) = 3
+
+    this.P_mat(7+floor_ind, 1, 1) = 2
+    this.P_mat(7+floor_ind, 1, 2) = 0
+    this.P_mat(7+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(7+floor_ind, 2, 2) = 3
+    this.P_mat(7+floor_ind, 3, 1) = 5
+    this.P_mat(7+floor_ind, 3, 2) = 0
+
+    this.P_mat(8+floor_ind, 1, 1) = 5
+    this.P_mat(8+floor_ind, 1, 2) = 0
+    this.P_mat(8+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(8+floor_ind, 2, 2) = 3
+    this.P_mat(8+floor_ind, 3, 1) = 4*(2+(this.nx-1)*this.nz)
+    this.P_mat(8+floor_ind, 3, 2) = 3
+
+    floor_ind = floor_ind + 8
+
+    LOOP FOR i = 2 TO this.nz-1
+        this.P_mat(1+floor_ind, 1, 1) = 4*(i+(this.nx-2)*this.nz)
+        this.P_mat(1+floor_ind, 1, 2) = 3
+        this.P_mat(1+floor_ind, 2, 1) = 4*(i-1+(this.nx-1)*this.nz) - 1
+        this.P_mat(1+floor_ind, 2, 2) = 3
+        this.P_mat(1+floor_ind, 3, 1) = 4*(i+(this.nx-1)*this.nz) - 3
+        this.P_mat(1+floor_ind, 3, 2) = 3
+
+        this.P_mat(2+floor_ind, 1, 1) = 4*(i-1+(this.nx-1)*this.nz) - 1
+        this.P_mat(2+floor_ind, 1, 2) = 3
+        this.P_mat(2+floor_ind, 2, 1) = 4*(i+(this.nx-2)*this.nz)
+        this.P_mat(2+floor_ind, 2, 2) = 3
+        this.P_mat(2+floor_ind, 3, 1) = 4*i - 2
+        this.P_mat(2+floor_ind, 3, 2) = 0
+
+        this.P_mat(3+floor_ind, 1, 1) = 4*(i+(this.nx-2)*this.nz)
+        this.P_mat(3+floor_ind, 1, 2) = 3
+        this.P_mat(3+floor_ind, 2, 1) = 4*(i+1+(this.nx-1)*this.nz) - 3
+        this.P_mat(3+floor_ind, 2, 2) = 3
+        this.P_mat(3+floor_ind, 3, 1) = 4*i - 2
+        this.P_mat(3+floor_ind, 3, 2) = 0
+
+        this.P_mat(4+floor_ind, 1, 1) = 4*(i+(this.nx-1)*this.nz) - 2
+        this.P_mat(4+floor_ind, 1, 2) = 3
+        this.P_mat(4+floor_ind, 2, 1) = 4*(i+1+(this.nx-1)*this.nz) - 3
+        this.P_mat(4+floor_ind, 2, 2) = 3
+        this.P_mat(4+floor_ind, 3, 1) = 4*(i+(this.nx-2)*this.nz)
+        this.P_mat(4+floor_ind, 3, 2) = 3
+
+        this.P_mat(5+floor_ind, 1, 1) = 4*(i+(this.nx-1)*this.nz)
+        this.P_mat(5+floor_ind, 1, 2) = 3
+        this.P_mat(5+floor_ind, 2, 1) = 4*(i-1+(this.nx-1)*this.nz) - 1
+        this.P_mat(5+floor_ind, 2, 2) = 3
+        this.P_mat(5+floor_ind, 3, 1) = 4*i - 2
+        this.P_mat(5+floor_ind, 3, 2) = 0
+
+        this.P_mat(6+floor_ind, 1, 1) = 4*i - 2
+        this.P_mat(6+floor_ind, 1, 2) = 0
+        this.P_mat(6+floor_ind, 2, 1) = 4*(i+1+(this.nx-1)*this.nz) - 3
+        this.P_mat(6+floor_ind, 2, 2) = 3
+        this.P_mat(6+floor_ind, 3, 1) = 4*(i+(this.nx-1)*this.nz) - 1
+        this.P_mat(6+floor_ind, 3, 2) = 3
+
+        this.P_mat(7+floor_ind, 1, 1) = 4*i - 2
+        this.P_mat(7+floor_ind, 1, 2) = 0
+        this.P_mat(7+floor_ind, 2, 1) = 4*(i+(this.nx-1)*this.nz) - 1
+        this.P_mat(7+floor_ind, 2, 2) = 3
+        this.P_mat(7+floor_ind, 3, 1) = 4*(i+1) - 3
+        this.P_mat(7+floor_ind, 3, 2) = 0
+
+        this.P_mat(8+floor_ind, 1, 1) = 4*(i+1) - 3
+        this.P_mat(8+floor_ind, 1, 2) = 0
+        this.P_mat(8+floor_ind, 2, 1) = 4*(i+(this.nx-1)*this.nz) - 1
+        this.P_mat(8+floor_ind, 2, 2) = 3
+        this.P_mat(8+floor_ind, 3, 1) = 4*(i+1+(this.nx-1)*this.nz)
+        this.P_mat(8+floor_ind, 3, 2) = 3
+
+        floor_ind = floor_ind + 8
+    REPEAT
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(this.nz*this.nx-this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 3
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz*this.nx-1) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 3
+    this.P_mat(1+floor_ind, 3, 1) = 4*this.nz*this.nx - 3
+    this.P_mat(1+floor_ind, 3, 2) = 3
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz*this.nx-1) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 3
+    this.P_mat(2+floor_ind, 2, 1) = 4*(this.nz*this.nx-this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 3
+    this.P_mat(2+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(2+floor_ind, 3, 2) = 0
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(this.nz*this.nx-this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 3
+    this.P_mat(3+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(3+floor_ind, 2, 2) = 4
+    this.P_mat(3+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(3+floor_ind, 3, 2) = 0
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*this.nz*this.nx - 2
+    this.P_mat(4+floor_ind, 1, 2) = 3
+    this.P_mat(4+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(4+floor_ind, 2, 2) = 4
+    this.P_mat(4+floor_ind, 3, 1) = 4*(this.nz*this.nx-this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 3
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*this.nz*this.nx
+    this.P_mat(5+floor_ind, 1, 2) = 3
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz*this.nx-1) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 3
+    this.P_mat(5+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(5+floor_ind, 3, 2) = 0
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(6+floor_ind, 1, 2) = 0
+    this.P_mat(6+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(6+floor_ind, 2, 2) = 4
+    this.P_mat(6+floor_ind, 3, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(6+floor_ind, 3, 2) = 3
+
+    this.P_mat(7+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(7+floor_ind, 1, 2) = 0
+    this.P_mat(7+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(7+floor_ind, 2, 2) = 3
+    this.P_mat(7+floor_ind, 3, 1) = 1
+    this.P_mat(7+floor_ind, 3, 2) = 5
+
+    this.P_mat(8+floor_ind, 1, 1) = 1
+    this.P_mat(8+floor_ind, 1, 2) = 5
+    this.P_mat(8+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(8+floor_ind, 2, 2) = 3
+    this.P_mat(8+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(8+floor_ind, 3, 2) = 4
+
+    floor_ind = floor_ind + 8
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 4
+    this.P_mat(1+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(1+floor_ind, 2, 2) = 3
+    this.P_mat(1+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(1+floor_ind, 3, 2) = 4
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(2+floor_ind, 1, 2) = 3
+    this.P_mat(2+floor_ind, 2, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 4
+    this.P_mat(2+floor_ind, 3, 1) = 2
+    this.P_mat(2+floor_ind, 3, 2) = 5
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 4
+    this.P_mat(3+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(3+floor_ind, 2, 2) = 4
+    this.P_mat(3+floor_ind, 3, 1) = 2
+    this.P_mat(3+floor_ind, 3, 2) = 5
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz) - 2
+    this.P_mat(4+floor_ind, 1, 2) = 4
+    this.P_mat(4+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(4+floor_ind, 2, 2) = 4
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 4
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(5+floor_ind, 1, 2) = 4
+    this.P_mat(5+floor_ind, 2, 1) = 4*this.nz*this.nx - 1
+    this.P_mat(5+floor_ind, 2, 2) = 3
+    this.P_mat(5+floor_ind, 3, 1) = 2
+    this.P_mat(5+floor_ind, 3, 2) = 5
+
+    this.P_mat(6+floor_ind, 1, 1) = 2
+    this.P_mat(6+floor_ind, 1, 2) = 5
+    this.P_mat(6+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(6+floor_ind, 2, 2) = 4
+    this.P_mat(6+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(6+floor_ind, 3, 2) = 4
+
+    floor_ind = floor_ind + 6
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(this.nz*this.nx)
+    this.P_mat(1+floor_ind, 1, 2) = 1
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz-1) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 2
+    this.P_mat(1+floor_ind, 3, 1) = 4*this.nz - 3
+    this.P_mat(1+floor_ind, 3, 2) = 2
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz-1) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 2
+    this.P_mat(2+floor_ind, 2, 1) = 4*(this.nz*this.nx)
+    this.P_mat(2+floor_ind, 2, 2) = 1
+    this.P_mat(2+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(2+floor_ind, 3, 2) = 2
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(this.nz*this.nx)
+    this.P_mat(3+floor_ind, 1, 2) = 1
+    this.P_mat(3+floor_ind, 2, 1) = 1
+    this.P_mat(3+floor_ind, 2, 2) = 0
+    this.P_mat(3+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(3+floor_ind, 3, 2) = 2
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(4+floor_ind, 1, 2) = 2
+    this.P_mat(4+floor_ind, 2, 1) = 1
+    this.P_mat(4+floor_ind, 2, 2) = 0
+    this.P_mat(4+floor_ind, 3, 1) = 4*(this.nz*this.nx)
+    this.P_mat(4+floor_ind, 3, 2) = 1
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*this.nz
+    this.P_mat(5+floor_ind, 1, 2) = 2
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz-1) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 2
+    this.P_mat(5+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(5+floor_ind, 3, 2) = 2
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*2*this.nz - 2
+    this.P_mat(6+floor_ind, 1, 2) = 2
+    this.P_mat(6+floor_ind, 2, 1) = 1
+    this.P_mat(6+floor_ind, 2, 2) = 0
+    this.P_mat(6+floor_ind, 3, 1) = 4*this.nz - 1
+    this.P_mat(6+floor_ind, 3, 2) = 2
+
+    this.P_mat(7+floor_ind, 1, 1) = 4*2*this.nz - 2
+    this.P_mat(7+floor_ind, 1, 2) = 2
+    this.P_mat(7+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(7+floor_ind, 2, 2) = 2
+    this.P_mat(7+floor_ind, 3, 1) = 4*(1+this.nz) - 3
+    this.P_mat(7+floor_ind, 3, 2) = 0
+
+    this.P_mat(8+floor_ind, 1, 1) = 4*(1+this.nz) - 3
+    this.P_mat(8+floor_ind, 1, 2) = 0
+    this.P_mat(8+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(8+floor_ind, 2, 2) = 2
+    this.P_mat(8+floor_ind, 3, 1) = 4
+    this.P_mat(8+floor_ind, 3, 2) = 0
+
+    floor_ind = floor_ind + 8
+
+    LOOP FOR j = 2 TO this.nx-1
+        this.P_mat(1+floor_ind, 1, 1) = 4*(this.nz+(j-2)*this.nz)
+        this.P_mat(1+floor_ind, 1, 2) = 2
+        this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz-1+(j-1)*this.nz) - 1
+        this.P_mat(1+floor_ind, 2, 2) = 2
+        this.P_mat(1+floor_ind, 3, 1) = 4*(this.nz+(j-1)*this.nz) - 3
+        this.P_mat(1+floor_ind, 3, 2) = 2
+
+        this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz-1+(j-1)*this.nz) - 1
+        this.P_mat(2+floor_ind, 1, 2) = 2
+        this.P_mat(2+floor_ind, 2, 1) = 4*(this.nz+(j-2)*this.nz)
+        this.P_mat(2+floor_ind, 2, 2) = 2
+        this.P_mat(2+floor_ind, 3, 1) = 4*(this.nz+j*this.nz) - 2
+        this.P_mat(2+floor_ind, 3, 2) = 2
+
+        this.P_mat(3+floor_ind, 1, 1) = 4*(this.nz+(j-2)*this.nz)
+        this.P_mat(3+floor_ind, 1, 2) = 2
+        this.P_mat(3+floor_ind, 2, 1) = 4*(1+(j-1)*this.nz) - 3
+        this.P_mat(3+floor_ind, 2, 2) = 0
+        this.P_mat(3+floor_ind, 3, 1) = 4*(this.nz+j*this.nz) - 2
+        this.P_mat(3+floor_ind, 3, 2) = 2
+
+        this.P_mat(4+floor_ind, 1, 1) = 4*(this.nz+(j-1)*this.nz) - 2
+        this.P_mat(4+floor_ind, 1, 2) = 2
+        this.P_mat(4+floor_ind, 2, 1) = 4*(1+(j-1)*this.nz) - 3
+        this.P_mat(4+floor_ind, 2, 2) = 0
+        this.P_mat(4+floor_ind, 3, 1) = 4*(this.nz+(j-2)*this.nz)
+        this.P_mat(4+floor_ind, 3, 2) = 2
+
+        this.P_mat(5+floor_ind, 1, 1) = 4*(this.nz+(j-1)*this.nz)
+        this.P_mat(5+floor_ind, 1, 2) = 2
+        this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz-1+(j-1)*this.nz) - 1
+        this.P_mat(5+floor_ind, 2, 2) = 2
+        this.P_mat(5+floor_ind, 3, 1) = 4*(this.nz+j*this.nz) - 2
+        this.P_mat(5+floor_ind, 3, 2) = 2
+
+        this.P_mat(6+floor_ind, 1, 1) = 4*(this.nz+j*this.nz) - 2
+        this.P_mat(6+floor_ind, 1, 2) = 2
+        this.P_mat(6+floor_ind, 2, 1) = 4*(1+(j-1)*this.nz) - 3
+        this.P_mat(6+floor_ind, 2, 2) = 0
+        this.P_mat(6+floor_ind, 3, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(6+floor_ind, 3, 2) = 2
+
+        this.P_mat(7+floor_ind, 1, 1) = 4*(this.nz+j*this.nz) - 2
+        this.P_mat(7+floor_ind, 1, 2) = 2
+        this.P_mat(7+floor_ind, 2, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(7+floor_ind, 2, 2) = 2
+        this.P_mat(7+floor_ind, 3, 1) = 4*(1+j*this.nz) - 3
+        this.P_mat(7+floor_ind, 3, 2) = 0
+
+        this.P_mat(8+floor_ind, 1, 1) = 4*(1+j*this.nz) - 3
+        this.P_mat(8+floor_ind, 1, 2) = 0
+        this.P_mat(8+floor_ind, 2, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(8+floor_ind, 2, 2) = 2
+        this.P_mat(8+floor_ind, 3, 1) = 4*(1+(j-1)*this.nz)
+        this.P_mat(8+floor_ind, 3, 2) = 0
+
+        floor_ind = floor_ind + 8
+    REPEAT
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(this.nz+(this.nx-2)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 2
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz-1+(this.nx-1)*this.nz) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 2
+    this.P_mat(1+floor_ind, 3, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 3
+    this.P_mat(1+floor_ind, 3, 2) = 2
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz-1+(this.nx-1)*this.nz) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 2
+    this.P_mat(2+floor_ind, 2, 1) = 4*(this.nz+(this.nx-2)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 2
+    this.P_mat(2+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(2+floor_ind, 3, 2) = 6
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(this.nz+(this.nx-2)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 2
+    this.P_mat(3+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(3+floor_ind, 2, 2) = 0
+    this.P_mat(3+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(3+floor_ind, 3, 2) = 6
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 2
+    this.P_mat(4+floor_ind, 1, 2) = 2
+    this.P_mat(4+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(4+floor_ind, 2, 2) = 0
+    this.P_mat(4+floor_ind, 3, 1) = 4*(this.nz+(this.nx-2)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 2
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*(this.nz+(this.nx-1)*this.nz)
+    this.P_mat(5+floor_ind, 1, 2) = 2
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz-1+(this.nx-1)*this.nz) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 2
+    this.P_mat(5+floor_ind, 3, 1) = 4*this.nz - 2
+    this.P_mat(5+floor_ind, 3, 2) = 6
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(6+floor_ind, 1, 2) = 6
+    this.P_mat(6+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(6+floor_ind, 2, 2) = 0
+    this.P_mat(6+floor_ind, 3, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(6+floor_ind, 3, 2) = 2
+
+    this.P_mat(7+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(7+floor_ind, 1, 2) = 6
+    this.P_mat(7+floor_ind, 2, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(7+floor_ind, 2, 2) = 2
+    this.P_mat(7+floor_ind, 3, 1) = 1
+    this.P_mat(7+floor_ind, 3, 2) = 7
+
+    this.P_mat(8+floor_ind, 1, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(8+floor_ind, 1, 2) = 2
+    this.P_mat(8+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(8+floor_ind, 2, 2) = 0
+    this.P_mat(8+floor_ind, 3, 1) = 1
+    this.P_mat(8+floor_ind, 3, 2) = 7
+
+    floor_ind = floor_ind + 8
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 4
+    this.P_mat(1+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(1+floor_ind, 2, 2) = 0
+    this.P_mat(1+floor_ind, 3, 1) = 1
+    this.P_mat(1+floor_ind, 3, 2) = 5
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*this.nz - 1
+    this.P_mat(2+floor_ind, 1, 2) = 0
+    this.P_mat(2+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 4
+    this.P_mat(2+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(2+floor_ind, 3, 2) = 5
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 4
+    this.P_mat(3+floor_ind, 2, 1) = 5
+    this.P_mat(3+floor_ind, 2, 2) = 5
+    this.P_mat(3+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(3+floor_ind, 3, 2) = 5
+
+    this.P_mat(4+floor_ind, 1, 1) = 2
+    this.P_mat(4+floor_ind, 1, 2) = 5
+    this.P_mat(4+floor_ind, 2, 1) = 5
+    this.P_mat(4+floor_ind, 2, 2) = 5
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 4
+
+    this.P_mat(5+floor_ind, 1, 1) = 4
+    this.P_mat(5+floor_ind, 1, 2) = 5
+    this.P_mat(5+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(5+floor_ind, 2, 2) = 0
+    this.P_mat(5+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(5+floor_ind, 3, 2) = 5
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*(1+this.nz) - 2
+    this.P_mat(6+floor_ind, 1, 2) = 5
+    this.P_mat(6+floor_ind, 2, 1) = 5
+    this.P_mat(6+floor_ind, 2, 2) = 5
+    this.P_mat(6+floor_ind, 3, 1) = 3
+    this.P_mat(6+floor_ind, 3, 2) = 5
+
+    this.P_mat(7+floor_ind, 1, 1) = 4*2*this.nz - 2
+    this.P_mat(7+floor_ind, 1, 2) = 0
+    this.P_mat(7+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(7+floor_ind, 2, 2) = 0
+    this.P_mat(7+floor_ind, 3, 1) = 4*(1+this.nz) - 3
+    this.P_mat(7+floor_ind, 3, 2) = 5
+
+    this.P_mat(8+floor_ind, 1, 1) = 4*this.nz - 1
+    this.P_mat(8+floor_ind, 1, 2) = 0
+    this.P_mat(8+floor_ind, 2, 1) = 4
+    this.P_mat(8+floor_ind, 2, 2) = 5
+    this.P_mat(8+floor_ind, 3, 1) = 4*(1+this.nz) - 3
+    this.P_mat(8+floor_ind, 3, 2) = 5
+
+    floor_ind = floor_ind + 8
+
+    LOOP FOR j = 2 TO this.nx-1
+        this.P_mat(1+floor_ind, 1, 1) = 4*(1+(j-2)*this.nz)
+        this.P_mat(1+floor_ind, 1, 2) = 5
+        this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(1+floor_ind, 2, 2) = 0
+        this.P_mat(1+floor_ind, 3, 1) = 4*(1+(j-1)*this.nz) - 3
+        this.P_mat(1+floor_ind, 3, 2) = 5
+
+        this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(2+floor_ind, 1, 2) = 0
+        this.P_mat(2+floor_ind, 2, 1) = 4*(1+(j-2)*this.nz)
+        this.P_mat(2+floor_ind, 2, 2) = 5
+        this.P_mat(2+floor_ind, 3, 1) = 4*(1+j*this.nz) - 2
+        this.P_mat(2+floor_ind, 3, 2) = 5
+
+        this.P_mat(3+floor_ind, 1, 1) = 4*(1+(j-2)*this.nz)
+        this.P_mat(3+floor_ind, 1, 2) = 5
+        this.P_mat(3+floor_ind, 2, 1) = 4*(2+(j-1)*this.nz) - 3
+        this.P_mat(3+floor_ind, 2, 2) = 5
+        this.P_mat(3+floor_ind, 3, 1) = 4*(1+j*this.nz) - 2
+        this.P_mat(3+floor_ind, 3, 2) = 5
+
+        this.P_mat(4+floor_ind, 1, 1) = 4*(1+(j-1)*this.nz) - 2
+        this.P_mat(4+floor_ind, 1, 2) = 5
+        this.P_mat(4+floor_ind, 2, 1) = 4*(2+(j-1)*this.nz) - 3
+        this.P_mat(4+floor_ind, 2, 2) = 5
+        this.P_mat(4+floor_ind, 3, 1) = 4*(1+(j-2)*this.nz)
+        this.P_mat(4+floor_ind, 3, 2) = 5
+
+        this.P_mat(5+floor_ind, 1, 1) = 4*(1+(j-1)*this.nz)
+        this.P_mat(5+floor_ind, 1, 2) = 5
+        this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(5+floor_ind, 2, 2) = 0
+        this.P_mat(5+floor_ind, 3, 1) = 4*(1+j*this.nz) - 2
+        this.P_mat(5+floor_ind, 3, 2) = 5
+
+        this.P_mat(6+floor_ind, 1, 1) = 4*(1+j*this.nz) - 2
+        this.P_mat(6+floor_ind, 1, 2) = 5
+        this.P_mat(6+floor_ind, 2, 1) = 4*(2+(j-1)*this.nz) - 3
+        this.P_mat(6+floor_ind, 2, 2) = 5
+        this.P_mat(6+floor_ind, 3, 1) = 4*(1+(j-1)*this.nz) - 1
+        this.P_mat(6+floor_ind, 3, 2) = 5
+
+        this.P_mat(7+floor_ind, 1, 1) = 4*(this.nz+j*this.nz) - 2
+        this.P_mat(7+floor_ind, 1, 2) = 0
+        this.P_mat(7+floor_ind, 2, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(7+floor_ind, 2, 2) = 0
+        this.P_mat(7+floor_ind, 3, 1) = 4*(1+j*this.nz) - 3
+        this.P_mat(7+floor_ind, 3, 2) = 5
+
+        this.P_mat(8+floor_ind, 1, 1) = 4*(this.nz+(j-1)*this.nz) - 1
+        this.P_mat(8+floor_ind, 1, 2) = 0
+        this.P_mat(8+floor_ind, 2, 1) = 4*(1+(j-1)*this.nz)
+        this.P_mat(8+floor_ind, 2, 2) = 5
+        this.P_mat(8+floor_ind, 3, 1) = 4*(1+j*this.nz) - 3
+        this.P_mat(8+floor_ind, 3, 2) = 5
+
+        floor_ind = floor_ind + 8
+    REPEAT
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 5
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 0
+    this.P_mat(1+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz) - 3
+    this.P_mat(1+floor_ind, 3, 2) = 5
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 0
+    this.P_mat(2+floor_ind, 2, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 5
+    this.P_mat(2+floor_ind, 3, 1) = 2
+    this.P_mat(2+floor_ind, 3, 2) = 8
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 5
+    this.P_mat(3+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(3+floor_ind, 2, 2) = 5
+    this.P_mat(3+floor_ind, 3, 1) = 2
+    this.P_mat(3+floor_ind, 3, 2) = 8
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz) - 2
+    this.P_mat(4+floor_ind, 1, 2) = 5
+    this.P_mat(4+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(4+floor_ind, 2, 2) = 5
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-2)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 5
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(5+floor_ind, 1, 2) = 5
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 0
+    this.P_mat(5+floor_ind, 3, 1) = 2
+    this.P_mat(5+floor_ind, 3, 2) = 8
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(6+floor_ind, 1, 2) = 5
+    this.P_mat(6+floor_ind, 2, 1) = 2
+    this.P_mat(6+floor_ind, 2, 2) = 8
+    this.P_mat(6+floor_ind, 3, 1) = 4*(2+(this.nx-1)*this.nz) - 3
+    this.P_mat(6+floor_ind, 3, 2) = 5
+
+    this.P_mat(7+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(7+floor_ind, 1, 2) = 7
+    this.P_mat(7+floor_ind, 2, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(7+floor_ind, 2, 2) = 0
+    this.P_mat(7+floor_ind, 3, 1) = 1
+    this.P_mat(7+floor_ind, 3, 2) = 8
+
+    this.P_mat(8+floor_ind, 1, 1) = 4*(this.nz+(this.nx-1)*this.nz) - 1
+    this.P_mat(8+floor_ind, 1, 2) = 0
+    this.P_mat(8+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(8+floor_ind, 2, 2) = 5
+    this.P_mat(8+floor_ind, 3, 1) = 1
+    this.P_mat(8+floor_ind, 3, 2) = 8
+
+    floor_ind = floor_ind + 8
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*this.nz*this.nx
+    this.P_mat(1+floor_ind, 1, 2) = 2
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz-1) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 6
+    this.P_mat(1+floor_ind, 3, 1) = 4*this.nz - 3
+    this.P_mat(1+floor_ind, 3, 2) = 6
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz-1) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 6
+    this.P_mat(2+floor_ind, 2, 1) = 4*this.nz*this.nx
+    this.P_mat(2+floor_ind, 2, 2) = 2
+    this.P_mat(2+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(2+floor_ind, 3, 2) = 6
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*this.nz*this.nx
+    this.P_mat(3+floor_ind, 1, 2) = 2
+    this.P_mat(3+floor_ind, 2, 1) = 1
+    this.P_mat(3+floor_ind, 2, 2) = 7
+    this.P_mat(3+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(3+floor_ind, 3, 2) = 6
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(4+floor_ind, 1, 2) = 6
+    this.P_mat(4+floor_ind, 2, 1) = 1
+    this.P_mat(4+floor_ind, 2, 2) = 7
+    this.P_mat(4+floor_ind, 3, 1) = 4*this.nz*this.nx
+    this.P_mat(4+floor_ind, 3, 2) = 2
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*this.nz
+    this.P_mat(5+floor_ind, 1, 2) = 6
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz-1) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 6
+    this.P_mat(5+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(5+floor_ind, 3, 2) = 6
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*this.nz - 1
+    this.P_mat(6+floor_ind, 1, 2) = 6
+    this.P_mat(6+floor_ind, 2, 1) = 4*2*this.nz - 2
+    this.P_mat(6+floor_ind, 2, 2) = 6
+    this.P_mat(6+floor_ind, 3, 1) = 1
+    this.P_mat(6+floor_ind, 3, 2) = 7
+
+    floor_ind = floor_ind + 6
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 0
+    this.P_mat(1+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(1+floor_ind, 2, 2) = 6
+    this.P_mat(1+floor_ind, 3, 1) = 1
+    this.P_mat(1+floor_ind, 3, 2) = 7
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*this.nz - 1
+    this.P_mat(2+floor_ind, 1, 2) = 6
+    this.P_mat(2+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 0
+    this.P_mat(2+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(2+floor_ind, 3, 2) = 7
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 0
+    this.P_mat(3+floor_ind, 2, 1) = 5
+    this.P_mat(3+floor_ind, 2, 2) = 7
+    this.P_mat(3+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(3+floor_ind, 3, 2) = 7
+
+    this.P_mat(4+floor_ind, 1, 1) = 2
+    this.P_mat(4+floor_ind, 1, 2) = 7
+    this.P_mat(4+floor_ind, 2, 1) = 5
+    this.P_mat(4+floor_ind, 2, 2) = 7
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 0
+
+    this.P_mat(5+floor_ind, 1, 1) = 4
+    this.P_mat(5+floor_ind, 1, 2) = 7
+    this.P_mat(5+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(5+floor_ind, 2, 2) = 6
+    this.P_mat(5+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(5+floor_ind, 3, 2) = 7
+
+    this.P_mat(6+floor_ind, 1, 1) = 3
+    this.P_mat(6+floor_ind, 1, 2) = 7
+    this.P_mat(6+floor_ind, 2, 1) = 4*(1+this.nz) - 2
+    this.P_mat(6+floor_ind, 2, 2) = 7
+    this.P_mat(6+floor_ind, 3, 1) = 5
+    this.P_mat(6+floor_ind, 3, 2) = 7
+
+    this.P_mat(7+floor_ind, 1, 1) = 2
+    this.P_mat(7+floor_ind, 1, 2) = 7
+    this.P_mat(7+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(7+floor_ind, 2, 2) = 0
+    this.P_mat(7+floor_ind, 3, 1) = 5
+    this.P_mat(7+floor_ind, 3, 2) = 7
+
+    this.P_mat(8+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz) - 1
+    this.P_mat(8+floor_ind, 1, 2) = 0
+    this.P_mat(8+floor_ind, 2, 1) = 4*(2+(this.nx-1)*this.nz)
+    this.P_mat(8+floor_ind, 2, 2) = 0
+    this.P_mat(8+floor_ind, 3, 1) = 5
+    this.P_mat(8+floor_ind, 3, 2) = 7
+
+    floor_ind = floor_ind + 8
+
+    LOOP FOR i = 2 TO this.nz-1
+        this.P_mat(1+floor_ind, 1, 1) = 4*(i+(this.nx-1)*this.nz)
+        this.P_mat(1+floor_ind, 1, 2) = 0
+        this.P_mat(1+floor_ind, 2, 1) = 4*(i-1) - 1 
+        this.P_mat(1+floor_ind, 2, 2) = 7
+        this.P_mat(1+floor_ind, 3, 1) = 4*i - 3
+        this.P_mat(1+floor_ind, 3, 2) = 7
+
+        this.P_mat(2+floor_ind, 1, 1) = 4*(i-1) - 1
+        this.P_mat(2+floor_ind, 1, 2) = 7
+        this.P_mat(2+floor_ind, 2, 1) = 4*(i+(this.nx-1)*this.nz)
+        this.P_mat(2+floor_ind, 2, 2) = 0
+        this.P_mat(2+floor_ind, 3, 1) = 4*(i+this.nz) - 2
+        this.P_mat(2+floor_ind, 3, 2) = 7
+
+        this.P_mat(3+floor_ind, 1, 1) = 4*(i+(this.nx-1)*this.nz)
+        this.P_mat(3+floor_ind, 1, 2) = 0
+        this.P_mat(3+floor_ind, 2, 1) = 4*(i+1) - 3
+        this.P_mat(3+floor_ind, 2, 2) = 7
+        this.P_mat(3+floor_ind, 3, 1) = 4*(i+this.nz) - 2
+        this.P_mat(3+floor_ind, 3, 2) = 7
+
+        this.P_mat(4+floor_ind, 1, 1) = 4*i - 2
+        this.P_mat(4+floor_ind, 1, 2) = 7
+        this.P_mat(4+floor_ind, 2, 1) = 4*(i+1) - 3
+        this.P_mat(4+floor_ind, 2, 2) = 7
+        this.P_mat(4+floor_ind, 3, 1) = 4*(i+(this.nx-1)*this.nz)
+        this.P_mat(4+floor_ind, 3, 2) = 0
+
+        this.P_mat(5+floor_ind, 1, 1) = 4*i
+        this.P_mat(5+floor_ind, 1, 2) = 7
+        this.P_mat(5+floor_ind, 2, 1) = 4*(i-1) - 1
+        this.P_mat(5+floor_ind, 2, 2) = 7
+        this.P_mat(5+floor_ind, 3, 1) = 4*(i+this.nz) - 2
+        this.P_mat(5+floor_ind, 3, 2) = 7
+
+        this.P_mat(6+floor_ind, 1, 1) = 4*i - 1
+        this.P_mat(6+floor_ind, 1, 2) = 7
+        this.P_mat(6+floor_ind, 2, 1) = 4*(i+this.nz) - 2
+        this.P_mat(6+floor_ind, 2, 2) = 7
+        this.P_mat(6+floor_ind, 3, 1) = 4*(i+1) - 3
+        this.P_mat(6+floor_ind, 3, 2) = 7
+
+        this.P_mat(7+floor_ind, 1, 1) = 4*i - 2
+        this.P_mat(7+floor_ind, 1, 2) = 7
+        this.P_mat(7+floor_ind, 2, 1) = 4*(i+(this.nx-1)*this.nz) - 1
+        this.P_mat(7+floor_ind, 2, 2) = 0
+        this.P_mat(7+floor_ind, 3, 1) = 4*(i+1) - 3
+        this.P_mat(7+floor_ind, 3, 2) = 7
+
+        this.P_mat(8+floor_ind, 1, 1) = 4*(i+(this.nx-1)*this.nz) - 1
+        this.P_mat(8+floor_ind, 1, 2) = 0
+        this.P_mat(8+floor_ind, 2, 1) = 4*(i+1+(this.nx-1)*this.nz)
+        this.P_mat(8+floor_ind, 2, 2) = 0
+        this.P_mat(8+floor_ind, 3, 1) = 4*(i+1) - 3
+        this.P_mat(8+floor_ind, 3, 2) = 7
+
+        floor_ind = floor_ind + 8
+    REPEAT
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*this.nz*this.nx
+    this.P_mat(1+floor_ind, 1, 2) = 0
+    this.P_mat(1+floor_ind, 2, 1) = 4*(this.nz-1) - 1
+    this.P_mat(1+floor_ind, 2, 2) = 7
+    this.P_mat(1+floor_ind, 3, 1) = 4*this.nz - 3
+    this.P_mat(1+floor_ind, 3, 2) = 7
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*(this.nz-1) - 1
+    this.P_mat(2+floor_ind, 1, 2) = 7
+    this.P_mat(2+floor_ind, 2, 1) = 4*this.nz*this.nx
+    this.P_mat(2+floor_ind, 2, 2) = 0
+    this.P_mat(2+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(2+floor_ind, 3, 2) = 7
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*this.nz*this.nx
+    this.P_mat(3+floor_ind, 1, 2) = 0
+    this.P_mat(3+floor_ind, 2, 1) = 1
+    this.P_mat(3+floor_ind, 2, 2) = 8
+    this.P_mat(3+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(3+floor_ind, 3, 2) = 7
+
+    this.P_mat(4+floor_ind, 1, 1) = 4*this.nz - 2
+    this.P_mat(4+floor_ind, 1, 2) = 7
+    this.P_mat(4+floor_ind, 2, 1) = 1
+    this.P_mat(4+floor_ind, 2, 2) = 8
+    this.P_mat(4+floor_ind, 3, 1) = 4*this.nz*this.nx
+    this.P_mat(4+floor_ind, 3, 2) = 0
+
+    this.P_mat(5+floor_ind, 1, 1) = 4*this.nz
+    this.P_mat(5+floor_ind, 1, 2) = 7
+    this.P_mat(5+floor_ind, 2, 1) = 4*(this.nz-1) - 1
+    this.P_mat(5+floor_ind, 2, 2) = 7
+    this.P_mat(5+floor_ind, 3, 1) = 4*2*this.nz - 2
+    this.P_mat(5+floor_ind, 3, 2) = 7
+
+    this.P_mat(6+floor_ind, 1, 1) = 4*this.nz - 1
+    this.P_mat(6+floor_ind, 1, 2) = 7
+    this.P_mat(6+floor_ind, 2, 1) = 4*2*this.nz - 2
+    this.P_mat(6+floor_ind, 2, 2) = 7
+    this.P_mat(6+floor_ind, 3, 1) = 1
+    this.P_mat(6+floor_ind, 3, 2) = 8
+
+    floor_ind = floor_ind + 6
+
+    this.P_mat(1+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(1+floor_ind, 1, 2) = 5
+    this.P_mat(1+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(1+floor_ind, 2, 2) = 7
+    this.P_mat(1+floor_ind, 3, 1) = 1
+    this.P_mat(1+floor_ind, 3, 2) = 8  
+
+    this.P_mat(2+floor_ind, 1, 1) = 4*this.nz - 1
+    this.P_mat(2+floor_ind, 1, 2) = 7
+    this.P_mat(2+floor_ind, 2, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(2+floor_ind, 2, 2) = 5
+    this.P_mat(2+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(2+floor_ind, 3, 2) = 8
+
+    this.P_mat(3+floor_ind, 1, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(3+floor_ind, 1, 2) = 5
+    this.P_mat(3+floor_ind, 2, 1) = 5
+    this.P_mat(3+floor_ind, 2, 2) = 8
+    this.P_mat(3+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(3+floor_ind, 3, 2) = 8
+
+    this.P_mat(4+floor_ind, 1, 1) = 2
+    this.P_mat(4+floor_ind, 1, 2) = 8
+    this.P_mat(4+floor_ind, 2, 1) = 5
+    this.P_mat(4+floor_ind, 2, 2) = 8
+    this.P_mat(4+floor_ind, 3, 1) = 4*(1+(this.nx-1)*this.nz)
+    this.P_mat(4+floor_ind, 3, 2) = 5
+
+    this.P_mat(5+floor_ind, 1, 1) = 4
+    this.P_mat(5+floor_ind, 1, 2) = 8
+    this.P_mat(5+floor_ind, 2, 1) = 4*this.nz - 1
+    this.P_mat(5+floor_ind, 2, 2) = 7
+    this.P_mat(5+floor_ind, 3, 1) = 4*(1+this.nz) - 2
+    this.P_mat(5+floor_ind, 3, 2) = 8
+
+    this.P_mat(6+floor_ind, 1, 1) = 3
+    this.P_mat(6+floor_ind, 1, 2) = 8
+    this.P_mat(6+floor_ind, 2, 1) = 4*(1+this.nz) - 2
+    this.P_mat(6+floor_ind, 2, 2) = 8
+    this.P_mat(6+floor_ind, 3, 1) = 5
+    this.P_mat(6+floor_ind, 3, 2) = 8
+END P_mat_comp
+
+
+SUBROUTINE bar_lambda_comp(TENSEGRITY this^)
+
+    ARRAY(FLOOR(this.n_int*(this.n_int+1)/2), 3) OF REAL lambda_mat = 0
+
+    REAL d_lambda = 1.0/(this.n_int-1)
+    REAL lambda_1, lambda_2, lambda_3 = 0
+
+    LOOP FOR i = 0 TO this.n_int-1
+        LOOP FOR j = 0 TO this.n_int-i-1
+            lambda_3 = i*d_lambda
+            lambda_2 = j*d_lambda
+            lambda_1 = 1.0 - lambda_2 - lambda_3
+
+            lambda_mat(FLOOR(j+i*(2*this.n_int+1-i)/2+1), 1) = lambda_1
+            lambda_mat(FLOOR(j+i*(2*this.n_int+1-i)/2+1), 2) = lambda_2
+            lambda_mat(FLOOR(j+i*(2*this.n_int+1-i)/2+1), 3) = lambda_3
+        REPEAT
+    REPEAT
+
+    INTEGER count = 1
+
+    ARRAY(3) OF INTEGER sub_tri_vert_even = (1,            2, this.n_int+1)
+    ARRAY(3) OF INTEGER sub_tri_vert_odd  = (2, this.n_int+1, this.n_int+2)
+
+    LOOP FOR i = 0 TO this.n_int-2
+        LOOP FOR j = 0 TO 2*(this.n_int-i-1)-2
+            IF j MOD 2 = 0 THEN
+                this.bar_lambda_mat(count, 1) = (lambda_mat(sub_tri_vert_even(1) + FLOOR(j/2), 1) + lambda_mat(sub_tri_vert_even(2) + FLOOR(j/2), 1) + lambda_mat(sub_tri_vert_even(3) + FLOOR(j/2), 1)) / 3
+                this.bar_lambda_mat(count, 2) = (lambda_mat(sub_tri_vert_even(1) + FLOOR(j/2), 2) + lambda_mat(sub_tri_vert_even(2) + FLOOR(j/2), 2) + lambda_mat(sub_tri_vert_even(3) + FLOOR(j/2), 2)) / 3
+                this.bar_lambda_mat(count, 3) = (lambda_mat(sub_tri_vert_even(1) + FLOOR(j/2), 3) + lambda_mat(sub_tri_vert_even(2) + FLOOR(j/2), 3) + lambda_mat(sub_tri_vert_even(3) + FLOOR(j/2), 3)) / 3
+            ELSE
+                this.bar_lambda_mat(count, 1) = (lambda_mat(sub_tri_vert_odd(1) + FLOOR((j-1)/2), 1) + lambda_mat(sub_tri_vert_odd(2) + FLOOR((j-1)/2), 1) + lambda_mat(sub_tri_vert_odd(3) + FLOOR((j-1)/2), 1)) / 3
+                this.bar_lambda_mat(count, 2) = (lambda_mat(sub_tri_vert_odd(1) + FLOOR((j-1)/2), 2) + lambda_mat(sub_tri_vert_odd(2) + FLOOR((j-1)/2), 2) + lambda_mat(sub_tri_vert_odd(3) + FLOOR((j-1)/2), 2)) / 3
+                this.bar_lambda_mat(count, 3) = (lambda_mat(sub_tri_vert_odd(1) + FLOOR((j-1)/2), 3) + lambda_mat(sub_tri_vert_odd(2) + FLOOR((j-1)/2), 3) + lambda_mat(sub_tri_vert_odd(3) + FLOOR((j-1)/2), 3)) / 3
+            END IF
+            count = count + 1
+        REPEAT
+        sub_tri_vert_even(1) = sub_tri_vert_even(1) + this.n_int - i
+        sub_tri_vert_even(2) = sub_tri_vert_even(2) + this.n_int - i
+        sub_tri_vert_even(3) = sub_tri_vert_even(3) + this.n_int - i - 1
+
+        sub_tri_vert_odd(1) = sub_tri_vert_odd(1) + this.n_int - i
+        sub_tri_vert_odd(2) = sub_tri_vert_odd(2) + this.n_int - i - 1
+        sub_tri_vert_odd(3) = sub_tri_vert_odd(3) + this.n_int - i - 1
+    REPEAT
+END bar_lambda_comp
+
+
+SUBROUTINE X_0_comp(TENSEGRITY this^)
+    REAL CONSTANT PI
+    PI = 3.14159265358979323846
+
+    ARRAY(3, 3) OF REAL T_1
+    T_1(1, 1..3) = ( COS(this.alpha_1), 0, SIN(this.alpha_1))
+    T_1(2, 1..3) = (            0, 1,            0)
+    T_1(3, 1..3) = (-SIN(this.alpha_1), 0, COS(this.alpha_1))
+
+    ARRAY(3, 3) OF REAL T_2
+    T_2(1, 1..3) = ( COS(PI/4+PI/2), 0, SIN(PI/4+PI/2))
+    T_2(2, 1..3) = (         0, 1,         0)
+    T_2(3, 1..3) = (-SIN(PI/4+PI/2), 0, COS(PI/4+PI/2))
+    
+    ARRAY(3, 4) OF REAL vert_low, vert_low_temp
+    vert_low(1, 1..4) = (SQRT(2)*this.r, SQRT(2)*this.r, 0,         0)
+    vert_low(2, 1..4) = (        0,         0, 0,         0)
+    vert_low(3, 1..4) = (SQRT(2)*this.r,         0, 0, SQRT(2)*this.r)
+
+    vert_low_temp = vert_low
+    MatMult(T_1, vert_low_temp, vert_low)
+
+    ARRAY(3) OF REAL cell_center_pos
+    cell_center_pos(1..3) = (vert_low(1,1)/2, 0, vert_low(3,1)/2) 
+    
+    LOOP FOR i = 1 TO 3 AND j = 1 TO 4
+        vert_low(i,j) = vert_low(i,j) - cell_center_pos(i)
+    REPEAT
+    
+    ARRAY(3, 4) OF REAL vert_up
+    MatMult(T_2, vert_low, vert_up)
+    vert_up(2, 1..4) = (this.h, this.h, this.h, this.h)
+
+    ARRAY(3) OF REAL dx_0 = (vert_up(1,2), 0, 0)
+    ARRAY(3) OF REAL dz_0 = (0, 0, vert_up(3,1))
+
+    LOOP FOR i = 1 TO 3 AND j = 1 TO 4
+        vert_low(i,j) = vert_low(i,j) - dx_0(i) - dz_0(i)
+        vert_up(i,j)  = vert_up(i,j)  - dx_0(i) - dz_0(i)
+    REPEAT
+
+    n_N_ng = this.n_N - this.n_G
+
+    ARRAY(FLOOR(3*n_N_ng/2)) OF REAL X_0_sup
+    ARRAY(FLOOR(3*n_N_ng/2)) OF REAL X_0_inf
+
+    ARRAY(3,4) OF REAL vert_low_i
+    ARRAY(3,4) OF REAL vert_up_i
+
+    ARRAY(3) OF REAL dx
+    ARRAY(3) OF REAL dz
+    LOOP FOR i = 1 TO this.nz AND j = 1 TO this.nx
+        dx = ((j-1)*this.l_per, 0,           0)
+        dz = (          0, 0, (i-1)*this.l_per)
+        LOOP FOR k = 1 TO 3 AND m = 1 TO  4
+            vert_low_i(k,m) = vert_low(k,m) + dx(k) + dz(k)
+            vert_up_i(k,m)  = vert_up(k,m) + dx(k) + dz(k)
+        REPEAT
+        LOOP FOR k = 1 TO 4
+            X_0_sup(FLOOR(3*4*(i+(j-1)*this.nz)-(3*4-1)+3*(k-1)))   = vert_up_i(1,k)
+            X_0_sup(FLOOR(3*4*(i+(j-1)*this.nz)-(3*4-1)+3*(k-1)+1)) = vert_up_i(2,k)
+            X_0_sup(FLOOR(3*4*(i+(j-1)*this.nz)-(3*4-1)+3*(k-1)+2)) = vert_up_i(3,k)
+            X_0_inf(FLOOR(3*4*(i+(j-1)*this.nz)-(3*4-1)+3*(k-1)))   = vert_low_i(1,k)
+            X_0_inf(FLOOR(3*4*(i+(j-1)*this.nz)-(3*4-1)+3*(k-1)+1)) = vert_low_i(2,k)
+            X_0_inf(FLOOR(3*4*(i+(j-1)*this.nz)-(3*4-1)+3*(k-1)+2)) = vert_low_i(3,k)
+        REPEAT
+    REPEAT
+
+    ARRAY(3) OF REAL Dx
+    ARRAY(3) OF REAL Dz 
+
+    Dx = (this.nx*this.l_per, 0,        0)
+    Dz = (       0, 0, this.nz*this.l_per)
+
+    ARRAY(3*this.n_G) OF REAL X_0_g
+    ARRAY(3) OF REAL X_g
+
+    LOOP FOR i = 1 TO this.n_G
+        parent_ind = this.ghost_nodes(i, 2)
+        per_dir    = this.ghost_nodes(i, 3)
+
+        IF per_dir = 1 THEN
+            X_g(1) = X_0_sup(FLOOR(3*parent_ind-2)) - Dx(1)
+            X_g(2) = X_0_sup(FLOOR(3*parent_ind-1)) - Dx(2)
+            X_g(3) = X_0_sup(FLOOR(3*parent_ind))   - Dx(3)
+        ELSE IF per_dir = 2 THEN
+            X_g(1) = X_0_sup(FLOOR(3*parent_ind-2)) - Dz(1)
+            X_g(2) = X_0_sup(FLOOR(3*parent_ind-1)) - Dz(2)
+            X_g(3) = X_0_sup(FLOOR(3*parent_ind))   - Dz(3)
+        ELSE IF per_dir = 3 THEN
+            X_g(1) = X_0_sup(FLOOR(3*parent_ind-2)) + Dz(1)
+            X_g(2) = X_0_sup(FLOOR(3*parent_ind-1)) + Dz(2)
+            X_g(3) = X_0_sup(FLOOR(3*parent_ind))   + Dz(3)
+        ELSE IF per_dir = 4 THEN
+            X_g(1) = X_0_sup(FLOOR(3*parent_ind-2)) + Dx(1)
+            X_g(2) = X_0_sup(FLOOR(3*parent_ind-1)) + Dx(2)
+            X_g(3) = X_0_sup(FLOOR(3*parent_ind))   + Dx(3)
+        END IF
+
+     X_0_g(3*i-2) = X_g(1)
+     X_0_g(3*i-1) = X_g(2)
+     X_0_g(3*i)   = X_g(3)  
+    REPEAT
+
+    LOOP FOR i = 1 TO FLOOR(3*n_N_ng/2)
+        this.X_0(i) = X_0_sup(i)
+    REPEAT
+
+    LOOP FOR i = FLOOR(3*n_N_ng/2+1) TO FLOOR(2*3*n_N_ng/2)
+        this.X_0(i) = X_0_inf(i-FLOOR(3*n_N_ng/2+1)+1)
+    REPEAT
+
+    LOOP FOR i = FLOOR(2*3*n_N_ng/2+1) TO FLOOR(2*3*n_N_ng/2+3*this.n_G)
+        this.X_0(i) = X_0_g(i-FLOOR(2*3*n_N_ng/2+1)+1)
+    REPEAT
+END X_0_comp
+
+
+SUBROUTINE q_0_tilde_comp(TENSEGRITY this^)
+
+    ARRAY(3) OF REAL vec_dir
+    ARRAY(3) OF REAL X_A
+    ARRAY(3) OF REAL X_B
+    INTEGER ind_A
+    INTEGER ind_B
+
+    LOOP FOR i = 1 TO this.n_B
+        ind_A = this.B_con(i, 1)
+        ind_B = this.B_con(i, 2)
+
+        X_A(1) = this.X_0(3*ind_A-2)
+        X_A(2) = this.X_0(3*ind_A-1)
+        X_A(3) = this.X_0(3*ind_A)
+
+        X_B(1) = this.X_0(3*ind_B-2)
+        X_B(2) = this.X_0(3*ind_B-1)
+        X_B(3) = this.X_0(3*ind_B)
+
+        LOOP FOR k = 1 TO 3
+            vec_dir(k) = (X_B(k) - X_A(k))/this.l_b
+        REPEAT
+
+        this.q_0_tilde(2*i-1+2*this.n_B) = acos(vec_dir(3))
+        this.q_0_tilde(2*i+2*this.n_B)   = atan2(vec_dir(2), vec_dir(1))
+    REPEAT
+END q_0_tilde_comp
+
+
+SUBROUTINE bar_coord_2D(ARRAY(3) OF REAL bar_weights^; ARRAY(3,3) OF REAL vert_pos; REAL x,y)
+    REAL det_T = (vert_pos(1,1)-vert_pos(1,3))*(vert_pos(2,2)-vert_pos(2,3)) - (vert_pos(2,1)-vert_pos(2,3))*(vert_pos(1,2)-vert_pos(1,3))
+    bar_weights(1) = ((vert_pos(2,2)-vert_pos(2,3))*(x-vert_pos(1,3)) + (vert_pos(1,3)-vert_pos(1,2))*(y-vert_pos(2,3))) / det_T
+    bar_weights(2) = ((vert_pos(2,3)-vert_pos(2,1))*(x-vert_pos(1,3)) + (vert_pos(1,1)-vert_pos(1,3))*(y-vert_pos(2,3))) / det_T
+    bar_weights(3) = 1 - bar_weights(1) - bar_weights(2)
+END bar_coord_2D
+
+
+SUBROUTINE find_ind_panel(TENSEGRITY this^; REAL x,y; INTEGER ix,iy,dix,diy)
+  INTEGER ind = this.pan_ind_mat(2*ix+dix, 2*iy+diy)
+  !WRITE 2*ix+dix, 2*iy+diy, ind
+  REAL aux_x = x, aux_y = y
+
+  IF aux_x < 0 THEN
+    aux_x = aux_x + this.l_per*this.nz
+  ELSE IF aux_x > this.l_per*this.nz THEN
+    aux_x = aux_x - this.l_per*this.nz
+  END IF
+
+  IF aux_y < 0 THEN
+    aux_y = aux_y + this.l_per*this.nx
+  ELSE IF aux_y > this.l_per*this.nx THEN
+    aux_y = aux_y - this.l_per*this.nx
+  END IF
+
+  this.vert_pos(1,1) = this.X(3*this.P_mat(ind, 1, 1))
+  this.vert_pos(2,1) = this.X(3*this.P_mat(ind, 1, 1)-2)
+  this.vert_pos(3,1) = this.X(3*this.P_mat(ind, 1, 1)-1)
+  this.vert_pos(1,2) = this.X(3*this.P_mat(ind, 2, 1))
+  this.vert_pos(2,2) = this.X(3*this.P_mat(ind, 2, 1)-2)
+  this.vert_pos(3,2) = this.X(3*this.P_mat(ind, 2, 1)-1)
+  this.vert_pos(1,3) = this.X(3*this.P_mat(ind, 3, 1))
+  this.vert_pos(2,3) = this.X(3*this.P_mat(ind, 3, 1)-2)
+  this.vert_pos(3,3) = this.X(3*this.P_mat(ind, 3, 1)-1)
+
+  CASE this.P_mat(ind, 1, 2) OF
+    1: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+        this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+    2: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+    3: this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+    4: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+        this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+    5: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+    6: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+        this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+    7: this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+    8: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+        this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+  END CASE
+
+  CASE this.P_mat(ind, 2, 2) OF
+    1: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+        this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+    2: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+    3: this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+    4: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+        this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+    5: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+    6: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+        this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+    7: this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+    8: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+        this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+  END CASE
+
+  CASE this.P_mat(ind, 3, 2) OF
+    1: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+        this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+    2: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+    3: this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+    4: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+        this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+    5: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+    6: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+        this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+    7: this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+    8: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+        this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+  END CASE
+
+  bar_coord_2D(this.bar_weights, this.vert_pos, aux_x, aux_y)
+
+  IF (this.bar_weights(1) < 0 OR this.bar_weights(1) > 1 OR
+      this.bar_weights(2) < 0 OR this.bar_weights(2) > 1 OR
+      this.bar_weights(3) < 0 OR this.bar_weights(3) > 1) THEN
+
+    ind = 0
+    !WRITE this.bar_weights
+    LOOP WHILE ind >= 0 AND ind <= this.n_P AND ((this.bar_weights(1) < 0 OR this.bar_weights(1) > 1 OR 
+                                                  this.bar_weights(2) < 0 OR this.bar_weights(2) > 1 OR 
+                                                  this.bar_weights(3) < 0 OR this.bar_weights(3) > 1))
+        ind = ind + 1
+
+        IF ind > this.n_P THEN
+            ERROR "The point (" x", " y") is not on the tensegrity fabric!"
+        END IF
+
+        this.vert_pos(1,1) = this.X(3*this.P_mat(ind, 1, 1))
+        this.vert_pos(2,1) = this.X(3*this.P_mat(ind, 1, 1)-2)
+        this.vert_pos(3,1) = this.X(3*this.P_mat(ind, 1, 1)-1)
+        this.vert_pos(1,2) = this.X(3*this.P_mat(ind, 2, 1))
+        this.vert_pos(2,2) = this.X(3*this.P_mat(ind, 2, 1)-2)
+        this.vert_pos(3,2) = this.X(3*this.P_mat(ind, 2, 1)-1)
+        this.vert_pos(1,3) = this.X(3*this.P_mat(ind, 3, 1))
+        this.vert_pos(2,3) = this.X(3*this.P_mat(ind, 3, 1)-2)
+        this.vert_pos(3,3) = this.X(3*this.P_mat(ind, 3, 1)-1)
+
+        CASE this.P_mat(ind, 1, 2) OF
+        1: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+            this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+        2: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+        3: this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+        4: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+            this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+        5: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+        6: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+            this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+        7: this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+        8: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+            this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+        END CASE
+
+        CASE this.P_mat(ind, 2, 2) OF
+        1: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+            this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+        2: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+        3: this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+        4: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+            this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+        5: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+        6: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+            this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+        7: this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+        8: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+            this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+        END CASE
+
+        CASE this.P_mat(ind, 3, 2) OF
+        1: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+            this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+        2: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+        3: this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+        4: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+            this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+        5: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+        6: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+            this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+        7: this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+        8: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+            this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+        END CASE
+
+        bar_coord_2D(this.bar_weights, this.vert_pos, aux_x, aux_y)
+    REPEAT
+    this.pan_ind = ind
+    this.pan_ind_mat(2*ix+dix, 2*iy+diy) = ind
+  END IF
+  this.vert_vel_zy(1) = this.X_dot(3*this.P_mat(ind, 1, 1)-1)
+  this.vert_vel_zy(2) = this.X_dot(3*this.P_mat(ind, 2, 1)-1)
+  this.vert_vel_zy(3) = this.X_dot(3*this.P_mat(ind, 3, 1)-1)
+END find_ind_panel
+
+SUBROUTINE find_panel(TENSEGRITY this^; REAL x,y)
+  REAL aux_x = x, aux_y = y
+
+  IF aux_x < 0 THEN
+    aux_x = aux_x + this.l_per*this.nz
+  ELSE IF aux_x > this.l_per*this.nz THEN
+    aux_x = aux_x - this.l_per*this.nz
+  END IF
+
+  IF aux_y < 0 THEN
+    aux_y = aux_y + this.l_per*this.nx
+  ELSE IF aux_y > this.l_per*this.nx THEN
+    aux_y = aux_y - this.l_per*this.nx
+  END IF
+
+  INTEGER ind = 0
+  this.bar_weights(1) = -1
+  LOOP WHILE ind >= 0 AND ind <= this.n_P AND ((this.bar_weights(1) < 0 OR this.bar_weights(1) > 1 OR
+                                                this.bar_weights(2) < 0 OR this.bar_weights(2) > 1 OR
+                                                this.bar_weights(3) < 0 OR this.bar_weights(3) > 1))
+    ind = ind + 1
+
+    IF ind > this.n_P THEN
+        ERROR "The point (" x", " y") is not on the tensegrity fabric!"
+    END IF
+
+    this.vert_pos(1,1) = this.X(3*this.P_mat(ind, 1, 1))
+    this.vert_pos(2,1) = this.X(3*this.P_mat(ind, 1, 1)-2)
+    this.vert_pos(3,1) = this.X(3*this.P_mat(ind, 1, 1)-1)
+    this.vert_pos(1,2) = this.X(3*this.P_mat(ind, 2, 1))
+    this.vert_pos(2,2) = this.X(3*this.P_mat(ind, 2, 1)-2)
+    this.vert_pos(3,2) = this.X(3*this.P_mat(ind, 2, 1)-1)
+    this.vert_pos(1,3) = this.X(3*this.P_mat(ind, 3, 1))
+    this.vert_pos(2,3) = this.X(3*this.P_mat(ind, 3, 1)-2)
+    this.vert_pos(3,3) = this.X(3*this.P_mat(ind, 3, 1)-1)
+
+    CASE this.P_mat(ind, 1, 2) OF
+      1: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+         this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+      2: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+      3: this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+      4: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+         this.vert_pos(2,1) = this.vert_pos(2,1) - this.nx*this.l_per
+      5: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+      6: this.vert_pos(1,1) = this.vert_pos(1,1) - this.nz*this.l_per
+         this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+      7: this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+      8: this.vert_pos(1,1) = this.vert_pos(1,1) + this.nz*this.l_per
+         this.vert_pos(2,1) = this.vert_pos(2,1) + this.nx*this.l_per
+    END CASE
+
+    CASE this.P_mat(ind, 2, 2) OF
+      1: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+         this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+      2: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+      3: this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+      4: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+         this.vert_pos(2,2) = this.vert_pos(2,2) - this.nx*this.l_per
+      5: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+      6: this.vert_pos(1,2) = this.vert_pos(1,2) - this.nz*this.l_per
+         this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+      7: this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+      8: this.vert_pos(1,2) = this.vert_pos(1,2) + this.nz*this.l_per
+         this.vert_pos(2,2) = this.vert_pos(2,2) + this.nx*this.l_per
+    END CASE
+
+    CASE this.P_mat(ind, 3, 2) OF
+      1: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+         this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+      2: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+      3: this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+      4: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+         this.vert_pos(2,3) = this.vert_pos(2,3) - this.nx*this.l_per
+      5: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+      6: this.vert_pos(1,3) = this.vert_pos(1,3) - this.nz*this.l_per
+         this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+      7: this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+      8: this.vert_pos(1,3) = this.vert_pos(1,3) + this.nz*this.l_per
+         this.vert_pos(2,3) = this.vert_pos(2,3) + this.nx*this.l_per
+    END CASE
+
+    bar_coord_2D(this.bar_weights, this.vert_pos, aux_x, aux_y)
+  REPEAT
+    
+  this.vert_vel_zy(1) = this.X_dot(3*this.P_mat(ind, 1, 1)-1)
+  this.vert_vel_zy(2) = this.X_dot(3*this.P_mat(ind, 2, 1)-1)
+  this.vert_vel_zy(3) = this.X_dot(3*this.P_mat(ind, 3, 1)-1)
+END find_panel
+
+
+SUBROUTINE K_i_compute(TENSEGRITY this^; INTEGER K_ind)
+
+    X_comp(this)
+    X_dot_comp(this)
+    
+    f_n_comp(this)
+    
+    f_ext_sub(this)
+
+    LOOP FOR i = 1 TO 3*this.n_B
+        this.f_n(i) = this.f_n(i) + this.f_ext(i)
+    REPEAT
+    
+    f_mom_comp(this)
+
+    Cq_dot_compute(this)
+
+    LOOP FOR i = 1 TO this.n_B
+        this.K_mat(2*i-1,K_ind) = (this.f_mom(2*i-1) - this.Cq_dot(2*i-1))/this.I_0
+        this.K_mat(2*i,K_ind)   = (this.f_mom(2*i) - this.Cq_dot(2*i))/(this.I_0*SIN(this.q_tilde(2*i-1+2*this.n_B))^2)    
+    REPEAT
+
+    LOOP FOR i = 1 TO this.n_B
+        this.K_mat(2*i-1+2*this.n_B,K_ind) = this.q_tilde(2*i-1)
+        this.K_mat(2*i+2*this.n_B,K_ind)   = this.q_tilde(2*i)
+    REPEAT
+END K_i_compute
+
+
+SUBROUTINE timestep_tensegrity(TENSEGRITY this^; REAL deltat)
+
+    this.q_tilde_old = this.q_tilde
+    K_i_compute(this, 1)
+
+    LOOP FOR i = 1 TO this.n_q_tilde
+        this.q_tilde(i) = this.q_tilde_old(i) + deltat/2*this.K_mat(i,1)
+    REPEAT
+    this.time = this.time + 0.5*deltat
+    K_i_compute(this, 2)
+
+    LOOP FOR i = 1 TO this.n_q_tilde
+        this.q_tilde(i) = this.q_tilde_old(i) - deltat*this.K_mat(i,1) + 2*deltat*this.K_mat(i,2)
+    REPEAT
+    this.time = this.time + 0.5*deltat
+    K_i_compute(this, 3)
+
+    LOOP FOR i = 1 TO this.n_q_tilde
+        this.q_tilde(i) = this.q_tilde_old(i) + deltat*[1/6*this.K_mat(i,1) + 2/3*this.K_mat(i,2) + 1/6*this.K_mat(i,3)] 
+    REPEAT
+
+    X_comp(this)
+    X_dot_comp(this)
+END timestep_tensegrity
+
+
+
+SUBROUTINE mat_to_csv_real(ARRAY(*,*) OF REAL arr; STRING file_name)
+
+    output_ = CREATE(file_name)
+
+    LOOP FOR i = LO1(arr) TO HI1(arr)
+        LOOP FOR j = LO2(arr) TO HI2(arr)
+            WRITE TO output_ arr(i,j) ./.
+            IF j = HI2(arr) THEN
+                WRITE TO output_
+            ELSE
+                WRITE TO output_ ", " ./.
+            END IF
+        REPEAT
+    REPEAT
+    CLOSE(output_)
+END mat_to_csv_real
+
+
+SUBROUTINE vec_to_csv_real(ARRAY(*) OF REAL arr; STRING file_name)
+
+    output_ = CREATE(file_name)
+
+    LOOP FOR i = LO(arr) TO HI(arr)
+        WRITE TO output_ arr(i) ./.
+        WRITE TO output_
+    REPEAT
+    CLOSE(output_)
+END vec_to_csv_real
+
+
+SUBROUTINE mat_to_csv_int(ARRAY(*,*) OF INTEGER arr; STRING file_name)
+
+    output_ = CREATE(file_name)
+
+    LOOP FOR i = LO1(arr) TO HI1(arr)
+        LOOP FOR j = LO2(arr) TO HI2(arr)
+            WRITE TO output_ arr(i,j) ./.
+            IF j = HI2(arr) THEN
+                WRITE TO output_
+            ELSE
+                WRITE TO output_ ", " ./.
+            END IF
+        REPEAT
+    REPEAT
+    CLOSE(output_)
+END mat_to_csv_int
+
+
+SUBROUTINE vec_to_csv_int(ARRAY(*) OF INTEGER arr; STRING file_name)
+
+    output_ = CREATE(file_name)
+
+    LOOP FOR i = LO(arr) TO HI(arr)
+        WRITE TO output_ arr(i) ./.
+        WRITE TO output_
+    REPEAT
+    CLOSE(output_)
+END vec_to_csv_int

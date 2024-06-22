@@ -1,6 +1,6 @@
 ! note: this module must be USEd after all other SHARED declarations
 ! INCLUDE parallelbcs.h at the beginning
-!INCLUDE parallelbcs.h
+
 MODULE parupdate
 STRUCTURE[INTEGER direction; POINTER TO ARRAY(*,*) OF REAL xl,xl1,xh,xh1,yl,yl1,yh,yh1] comm
 
@@ -104,6 +104,7 @@ SUBROUTINE pbcp(ARRAY(*,*,*) OF REAL u^,v^; INTEGER parity)
 END pbcp
 END parupdate
 
+
 SUBROUTINE getmax(ARRAY(*) OF REAL val^)
     <*
     MPI_Allreduce(MPI_IN_PLACE, (double *) val__, val_h-val_l+1,
@@ -125,10 +126,3 @@ SUBROUTINE accumulateX(ARRAY(*) OF REAL valin^, valout^)
                   MPI_DOUBLE, MPI_SUM, cart_comm_x);
     *>
 END accumulateX
-
-SUBROUTINE accumulateY(ARRAY(*) OF REAL valin^, valout^)
-    <*
-    MPI_Allreduce((double *) valin__, (double *) valout__, valin_h-valin_l+1,
-              MPI_DOUBLE, MPI_SUM, cart_comm_y);
-    *>
-END accumulateY
