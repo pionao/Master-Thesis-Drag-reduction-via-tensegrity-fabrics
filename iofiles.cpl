@@ -5,7 +5,9 @@ IF savedfield#NULL AND READ BY NAME FROM savedfield it,headx,heady THEN
   READ FROM savedfield
   READ FROM savedfield
   POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
-      ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=savedfield
+     ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=savedfield
+  !POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
+  !    ARRAY(0..nx,0..ny,0..nz) OF VARS v] stored=savedfield
   zd=stored.z
   var(LO+1..HI-1,LO+1..HI-1)=stored.v(var.LO1+1..var.HI1-1,var.LO2+1..var.HI2-1)
 
@@ -42,13 +44,18 @@ SUBROUTINE savefield(POINTER TO CSTRING name)
       WRITE BY NAME TO savedfield nx,ny,nz,Lx:1.15,Ly:1.15,nu:1.15,deltat:1.15
       WRITE BY NAME TO savedfield it,headx:1.15,heady:1.15,t:1.15
       WRITE BY NAME TO savedfield
+!      POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
+!      ARRAY(1..nx,1..ny,0..nz) OF VARS v] tostore=savedfield
       POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
-      ARRAY(1..nx,1..ny,0..nz) OF VARS v] tostore=savedfield
+      ARRAY(0..nx,0..ny,0..nz) OF VARS v] tostore=savedfield
 !      WRITE BINARY TO savedfield zd
       tostore.z=zd
-      LOOP FOR ix=var.LO1+1 TO var.HI1-1
-        ARRAY(var.LO2+1..var.HI2-1,0..nz) OF VARS iobuf = var(ix,LO+1..HI-1)
-        tostore.v(ix,var.LO2+1..var.HI2-1)=iobuf
+!      LOOP FOR ix=var.LO1+1 TO var.HI1-1
+!        ARRAY(var.LO2+1..var.HI2-1,0..nz) OF VARS iobuf = var(ix,LO+1..HI-1)
+!        tostore.v(ix,var.LO2+1..var.HI2-1)=iobuf
+      LOOP FOR ix=var.LO1 TO var.HI1-1
+        ARRAY(var.LO2..var.HI2-1,0..nz) OF VARS iobuf = var(ix,LO..HI-1)
+        tostore.v(ix,var.LO2..var.HI2-1)=iobuf
 !         WRITE BINARY TO savedfield iobuf
       REPEAT
       CLOSE savedfield

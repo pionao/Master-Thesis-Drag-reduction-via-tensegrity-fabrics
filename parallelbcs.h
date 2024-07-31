@@ -1,9 +1,11 @@
 !#includedir "/opt/bwhpc/common/mpi/openmpi/4.1.0-intel-19.1/include/"
 !#includedir "/opt/openmpi/openmpi_4.0.1_ifort_19.0.1/include/"
 !#includedir "/opt/hlrs/non-spack/mpi/openmpi/4.0.5-gcc-9.2.0/include/"
-#includedir "/opt/openmpi/openmpi_4.0.1_ifort_19.0.1/include/"
+!#includedir "/opt/openmpi/openmpi_4.0.1_ifort_19.0.1/include/"
 !#includedir "/opt/hpe/hpc/mpt/mpt-2.23/bin/include/"
 !#includedir "/opt/hlrs/non-spack/compiler/intel/19.1.0.166/compilers_and_libraries_2020.0.166/linux/mpi/intel64/include/"
+#includedir "/usr/lib/x86_64-linux-gnu/openmpi/include/"
+
 #include <mpi.h>
 
 INTEGER iprocx, nprocx=atoi(COMMANDLINE(1)), iprocy, nprocy=atoi(COMMANDLINE(2))

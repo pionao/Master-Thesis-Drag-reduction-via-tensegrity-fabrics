@@ -7,6 +7,7 @@ TENSEGRITY = STRUCTURE[ INTEGER CONSTANT nx,nz,n_C,n_B,n_T,n_G,n_N,n_N_dof,n_T_d
                          REAL Lx,Lz,rho_b,k,sigma,h,r,l_b,I_0,alpha_1,l_per,l_v_1,l_h_1,
                               l_u_l,l_u_s,l_u_l_0,l_h_0,l_u_s_0,l_i_0,l_i_norm,
                               lambda_1,lambda_2,lambda_3,dA,d_lambda,normal_norm; 
+                         REAL rho_b_start, sigma_start, k_start, rho_b_end, sigma_end, k_end;
                          ARRAY(n_B,2) OF INTEGER B_con;
                          ARRAY(n_T,2) OF INTEGER T_con;
                          ARRAY(n_G,3) OF INTEGER ghost_nodes;
@@ -26,7 +27,11 @@ TENSEGRITY = STRUCTURE[ INTEGER CONSTANT nx,nz,n_C,n_B,n_T,n_G,n_N,n_N_dof,n_T_d
                          REAL time;
                          ARRAY(n_B2) OF REAL Cq_dot,f_mom;
                          ARRAY(n_B3) OF REAL f_ext, f_n;
-                         ARRAY(n_G3) OF REAL f_n_ghost
+                         ARRAY(n_G3) OF REAL f_n_ghost;
+                         INTEGER tens_it;
+                         REAL det_T,dlambda1_dx,dlambda2_dx,dlambda3_dx,dlambda3_dx,dlambda1_dy,dlambda2_dy,dlambda3_dy;
+                         ARRAY(3) OF REAL X_1_vel, X_2_vel, X_3_vel;
+                         REAL nu, p_max, disp_z_plus_max, disp_z_minus_max, vel_z_plus_max, vel_z_minus_max
 		   ]
 
 SUBROUTINE B_con_comp(TENSEGRITY this^) FOLLOWS
@@ -180,24 +185,227 @@ SUBROUTINE X_comp(TENSEGRITY this^)
     REPEAT
 END X_comp
 
-SUBROUTINE df_comp(TENSEGRITY this^) 
-  REAL c = 2
-  REAL A = 150
-  INTEGER n_per = 6
-  REAL k_z = (2*PI*n_per)/(this.Lz)
+SUBROUTINE df_comp(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, deltay, deltaz)
+  !REAL rho_f = 1 - EXP(-0.5*this.time) - 0.5*this.time*EXP(-0.5*this.time)
+  REAL rho_f = 1
+  BOOLEAN translated = FALSE
 
-  REAL p = A*COS(k_z*(this.x(3)-c*this.time))
-  !REAL p = A
-  this.df(1) = -p*this.dA*this.normal(1)
-  this.df(2) = -p*this.dA*this.normal(2)
-  this.df(3) = -p*this.dA*this.normal(3)
+  IF this.x(3) < 0 THEN
+    this.x(3) = this.x(3) + this.Lz
+  ELSE IF this.x(3) > this.Lz THEN
+    this.x(3) = this.x(3) - this.Lz
+  END IF
+
+  IF this.x(1) < 0 THEN
+    this.x(1) = this.x(1) + this.Lx
+  ELSE IF this.x(1) > this.Lx THEN
+    this.x(1) = this.x(1) - this.Lx
+  END IF
+
+  IF (this.x(2) < 0 OR this.x(1) < 0 OR this.x(1) > this.Lx OR this.x(3) < 0 OR this.x(3) > this.Lz) THEN
+    WRITE this.tens_it, this.x(3), this.x(1), this.x(2)
+    ERROR("The integration point is out of the computational domain!")
+  END IF
+
+  REAL du_dx=0, du_dy=0, du_dz, dv_dx=0, dv_dy=0, dv_dz, dw_dx, dw_dy, dw_dz
+
+  !du_dx = this.dlambda1_dx*this.X_1_vel(3) + this.dlambda2_dx*this.X_2_vel(3) + this.dlambda3_dx*this.X_3_vel(3)
+  !dv_dx = this.dlambda1_dx*this.X_1_vel(1) + this.dlambda2_dx*this.X_2_vel(1) + this.dlambda3_dx*this.X_3_vel(1)
+  dw_dx = this.dlambda1_dx*this.X_1_vel(2) + this.dlambda2_dx*this.X_2_vel(2) + this.dlambda3_dx*this.X_3_vel(2)
+
+  !du_dy = this.dlambda1_dy*this.X_1_vel(3) + this.dlambda2_dy*this.X_2_vel(3) + this.dlambda3_dy*this.X_3_vel(3)
+  !dv_dy = this.dlambda1_dy*this.X_1_vel(1) + this.dlambda2_dy*this.X_2_vel(1) + this.dlambda3_dy*this.X_3_vel(1)
+  dw_dy = this.dlambda1_dy*this.X_2_vel(2) + this.dlambda2_dy*this.X_2_vel(2) + this.dlambda3_dy*this.X_3_vel(2)
+
+  
+  REAL Dx, Dy, Dz
+  REAL c_0, c_1, c_2, c_3, c_4, c_5, c_6, c_7
+  REAL x_0, y_0, z_0, x_1, y_1, z_1
+  INTEGER ix_hi, ix_lo, iy_hi, iy_lo, iz_hi, iz_lo
+
+  ! Calcolo du_dz  
+  INTEGER ixu, iyu, izu
+  ixu = FLOOR((this.x(3)-0.5*deltax)/deltax)
+  iyu = FLOOR(this.x(1)/deltay)
+  izu = FLOOR((this.x(2)+deltaz)/deltaz)
+
+  IF ixu = -1 THEN
+    this.x(3) = this.x(3) + this.Lz
+    ixu = FLOOR((this.x(3)-0.5*deltax)/deltax)
+    translated = TRUE
+  END IF
+
+  x_0 = deltax*(ixu+0.5)
+  y_0 = deltay*iyu
+  z_0 = deltaz*izu
+  x_1 = deltax*(ixu+1.5)
+  y_1 = deltay*(iyu+1)
+  z_1 = deltaz*(izu+1)
+
+  Dx = (this.x(3)-x_0)/(x_1-x_0)
+  Dy = (this.x(1)-y_0)/(y_1-y_0)
+  Dz = (this.x(2)-z_0)/(z_1-z_0)
+
+  c_0 = var(ixu,iyu,izu).u
+  c_1 = var(ixu+1,iyu,izu).u - var(ixu,iyu,izu).u
+  c_2 = var(ixu,iyu+1,izu).u - var(ixu,iyu,izu).u
+  c_3 = var(ixu,iyu,izu+1).u - var(ixu,iyu,izu).u
+  c_4 = var(ixu+1,iyu+1,izu).u - var(ixu,iyu+1,izu).u - var(ixu+1,iyu,izu).u + var(ixu,iyu,izu).u
+  c_5 = var(ixu,iyu+1,izu+1).u - var(ixu,iyu,izu+1).u - var(ixu,iyu+1,izu).u + var(ixu,iyu,izu).u
+  c_6 = var(ixu+1,iyu,izu+1).u - var(ixu,iyu,izu+1).u - var(ixu+1,iyu,izu).u + var(ixu,iyu,izu).u
+  c_7 = var(ixu+1,iyu+1,izu+1).u - var(ixu,iyu+1,izu+1).u - var(ixu+1,iyu,izu+1).u - var(ixu+1,iyu+1,izu).u + var(ixu+1,iyu,izu).u + var(ixu,iyu,izu+1).u + var(ixu,iyu+1,izu).u - var(ixu,iyu,izu).u
+
+  REAL u = c_0 + c_1*Dx + c_2*Dy + c_3*Dz + c_4*Dx*Dy + c_5*Dy*Dz + c_6*Dx*Dz + c_7*Dx*Dy*Dz
+
+  du_dz = (u - this.lambda_1*this.X_1_vel(3) - this.lambda_2*this.X_2_vel(3) - this.lambda_3*this.X_3_vel(3)) / deltaz
+
+  IF translated = TRUE THEN
+    this.x(3) = this.x(3) - this.Lz
+    translated = FALSE
+  END IF
+
+  ! Calcolo dv_dz
+  INTEGER ixv, iyv, izv
+  ixv = FLOOR(this.x(3)/deltax)
+  iyv = FLOOR((this.x(1)-0.5*deltay)/deltay)
+  izv = FLOOR((this.x(2)+deltaz)/deltaz)
+
+  IF iyv = -1 THEN
+    this.x(1) = this.x(1) + this.Lx
+    iyv = FLOOR((this.x(1)-0.5*deltay)/deltay)
+    translated = TRUE
+  END IF
+
+  x_0 = deltax*ixv
+  y_0 = deltay*(iyv+0.5)
+  z_0 = deltaz*izv
+  x_1 = deltax*(ixv+1)
+  y_1 = deltay*(iyv+1.5)
+  z_1 = deltaz*(izv+1)
+
+  Dx = (this.x(3)-x_0)/(x_1-x_0)
+  Dy = (this.x(1)-y_0)/(y_1-y_0)
+  Dz = (this.x(2)-z_0)/(z_1-z_0)
+
+  c_0 = var(ixv,iyv,izv).v
+  c_1 = var(ixv+1,iyv,izv).v - var(ixv,iyv,izv).v
+  c_2 = var(ixv,iyv+1,izv).v - var(ixv,iyv,izv).v
+  c_3 = var(ixv,iyv,izv+1).v - var(ixv,iyv,izv).v
+  c_4 = var(ixv+1,iyv+1,izv).v - var(ixv,iyv+1,izv).v - var(ixv+1,iyv,izv).v + var(ixv,iyv,izv).v
+  c_5 = var(ixv,iyv+1,izv+1).v - var(ixv,iyv,izv+1).v - var(ixv,iyv+1,izv).v + var(ixv,iyv,izv).v
+  c_6 = var(ixv+1,iyv,izv+1).v - var(ixv,iyv,izv+1).v - var(ixv+1,iyv,izv).v + var(ixv,iyv,izv).v
+  c_7 = var(ixv+1,iyv+1,izv+1).v - var(ixv,iyv+1,izv+1).v - var(ixv+1,iyv,izv+1).v - var(ixv+1,iyv+1,izv).v + var(ixv+1,iyv,izv).v + var(ixv,iyv,izv+1).v + var(ixv,iyv+1,izv).v - var(ixv,iyv,izv).v
+
+  REAL v = c_0 + c_1*Dx + c_2*Dy + c_3*Dz + c_4*Dx*Dy + c_5*Dy*Dz + c_6*Dx*Dz + c_7*Dx*Dy*Dz
+
+  dv_dz = (v - this.lambda_1*this.X_1_vel(1) - this.lambda_2*this.X_2_vel(1) - this.lambda_3*this.X_3_vel(1)) / deltaz
+
+  IF translated = TRUE THEN
+    this.x(1) = this.x(1) - this.Lx
+    translated = FALSE
+  END IF
+
+  ! Calcolo dw_dz
+  INTEGER ixw, iyw, izw
+  ixw = FLOOR(this.x(3)/deltax)
+  iyw = FLOOR(this.x(1)/deltay)
+  izw = FLOOR((this.x(2)+0.5*deltaz)/deltaz)
+
+  x_0 = deltax*ixv
+  y_0 = deltay*iyv
+  z_0 = deltaz*(izv+0.5)
+  x_1 = deltax*(ixv+1)
+  y_1 = deltay*(iyv+1)
+  z_1 = deltaz*(izv+1.5)
+
+  Dx = (this.x(3)-x_0)/(x_1-x_0)
+  Dy = (this.x(1)-y_0)/(y_1-y_0)
+  Dz = (this.x(2)-z_0)/(z_1-z_0)
+
+  c_0 = var(ixw,iyw,izw).w
+  c_1 = var(ixw+1,iyw,izw).w - var(ixw,iyw,izw).w
+  c_2 = var(ixw,iyw+1,izw).w - var(ixw,iyw,izw).w
+  c_3 = var(ixw,iyw,izw+1).w - var(ixw,iyw,izw).w
+  c_4 = var(ixw+1,iyw+1,izw).w - var(ixw,iyw+1,izw).w - var(ixw+1,iyw,izw).w + var(ixw,iyw,izw).w
+  c_5 = var(ixw,iyw+1,izw+1).w - var(ixw,iyw,izw+1).w - var(ixw,iyw+1,izw).w + var(ixw,iyw,izw).w
+  c_6 = var(ixw+1,iyw,izw+1).w - var(ixw,iyw,izw+1).w - var(ixw+1,iyw,izw).w + var(ixw,iyw,izw).w
+  c_7 = var(ixw+1,iyw+1,izw+1).w - var(ixw,iyw+1,izw+1).w - var(ixw+1,iyw,izw+1).w - var(ixw+1,iyw+1,izw).w + var(ixw+1,iyw,izw).w + var(ixw,iyw,izw+1).w + var(ixw,iyw+1,izw).w - var(ixw,iyw,izw).w
+
+  REAL w = c_0 + c_1*Dx + c_2*Dy + c_3*Dz + c_4*Dx*Dy + c_5*Dy*Dz + c_6*Dx*Dz + c_7*Dx*Dy*Dz
+
+  dw_dz = (w - this.lambda_1*this.X_1_vel(2) - this.lambda_2*this.X_2_vel(2) - this.lambda_3*this.X_3_vel(2)) / deltaz
+
+  !WRITE u, this.X_1_vel(3), this.X_2_vel(3), this.X_3_vel(3), du_dz
+
+  ! Calcolo p
+
+  REAL dn = 1*SQRT(deltax*deltax+deltay*deltay+deltaz*deltaz)
+  !dn = 1
+  this.x(1) = this.x(1) + dn*this.normal(1)
+  this.x(2) = this.x(2) + dn*this.normal(2)
+  this.x(3) = this.x(3) + dn*this.normal(3)
+
+  IF this.x(3) < 0 THEN
+    this.x(3) = this.x(3) + this.Lz
+  ELSE IF this.x(3) > this.Lz THEN
+    this.x(3) = this.x(3) - this.Lz
+  END IF
+
+  IF this.x(1) < 0 THEN
+    this.x(1) = this.x(1) + this.Lx
+  ELSE IF this.x(1) > this.Lx THEN
+    this.x(1) = this.x(1) - this.Lx
+  END IF
+
+  INTEGER ixp, iyp, izp
+  ixp = FLOOR(this.x(3)/deltax)
+  iyp = FLOOR(this.x(1)/deltay)
+  izp = FLOOR(this.x(2)/deltaz)
+
+  x_0 = deltax*ixp
+  y_0 = deltay*iyp
+  z_0 = deltaz*izp
+  x_1 = deltax*(ixp+1)
+  y_1 = deltay*(iyp+1)
+  z_1 = deltaz*(izp+1)
+
+  Dx = (this.x(3)-x_0)/(x_1-x_0)
+  Dy = (this.x(1)-y_0)/(y_1-y_0)
+  Dz = (this.x(2)-z_0)/(z_1-z_0)
+
+  c_0 = var(ixp,iyp,izp).p
+  c_1 = var(ixp+1,iyp,izp).p - var(ixp,iyp,izp).p
+  c_2 = var(ixp,iyp+1,izp).p - var(ixp,iyp,izp).p
+  c_3 = var(ixp,iyp,izp+1).p - var(ixp,iyp,izp).p
+  c_4 = var(ixp+1,iyp+1,izp).p - var(ixp,iyp+1,izp).p - var(ixp+1,iyp,izp).p + var(ixp,iyp,izp).p
+  c_5 = var(ixp,iyp+1,izp+1).p - var(ixp,iyp,izp+1).p - var(ixp,iyp+1,izp).p + var(ixp,iyp,izp).p
+  c_6 = var(ixp+1,iyp,izp+1).p - var(ixp,iyp,izp+1).p - var(ixp+1,iyp,izp).p + var(ixp,iyp,izp).p
+  c_7 = var(ixp+1,iyp+1,izp+1).p - var(ixp,iyp+1,izp+1).p - var(ixp+1,iyp,izp+1).p - var(ixp+1,iyp+1,izp).p + var(ixp+1,iyp,izp).p + var(ixp,iyp,izp+1).p + var(ixp,iyp+1,izp).p - var(ixp,iyp,izp).p
+
+  REAL p = c_0 + c_1*Dx + c_2*Dy + c_3*Dz + c_4*Dx*Dy + c_5*Dy*Dz + c_6*Dx*Dz + c_7*Dx*Dy*Dz
+  !p =  0.5*COS(2*3.14159265359*(this.x(3)-2*this.time))
+  !WRITE var(ixp,iyp,izp).p, var(ixp+1,iyp,izp).p, var(ixp,iyp+1,izp).p, var(ixp,iyp,izp+1).p, var(ixp+1,iyp+1,izp).p, var(ixp+1,iyp,izp+1).p, var(ixp,iyp+1,izp+1).p, var(ixp+1,iyp+1,izp+1).p
+  !WRITE p
+
+  REAL sigma_11, sigma_12, sigma_13, sigma_22, sigma_23, sigma_33
+  sigma_11 = -p + 2*this.nu*du_dx
+  sigma_12 = this.nu*(du_dy+dv_dx)
+  sigma_13 = this.nu*(du_dz+dw_dx)
+  sigma_22 = -p + 2*this.nu*dv_dy
+  sigma_23 = this.nu*(dv_dz+dw_dy)
+  sigma_33 = -p + 2*this.nu*dw_dz
+
+  this.df(3) = rho_f*(sigma_11*this.normal(3)+sigma_12*this.normal(1)+sigma_13*this.normal(2))*this.dA
+  this.df(1) = rho_f*(sigma_12*this.normal(3)+sigma_22*this.normal(1)+sigma_23*this.normal(2))*this.dA
+  this.df(2) = rho_f*(sigma_13*this.normal(3)+sigma_23*this.normal(1)+sigma_33*this.normal(2))*this.dA
+
+  !WRITE this.df
+  !WRITE -p, 2*this.nu*dw_dz
 END df_comp
 
-SUBROUTINE f_ext_sub(TENSEGRITY this^)
+SUBROUTINE f_ext_sub(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, deltay, deltaz)
 
   this.f_ext = 0
-
-  this.d_lambda = 1 / (this.n_int-1)
 
   LOOP FOR i = 1 TO this.n_P
     this.ind_1 = this.P_mat(i, 1, 1)
@@ -215,6 +423,18 @@ SUBROUTINE f_ext_sub(TENSEGRITY this^)
     this.X_3(1) = this.X(3*this.ind_3 - 2)
     this.X_3(2) = this.X(3*this.ind_3 - 1)
     this.X_3(3) = this.X(3*this.ind_3)
+
+    this.X_1_vel(1) = this.X_dot(3*this.ind_1 - 2)
+    this.X_1_vel(2) = this.X_dot(3*this.ind_1 - 1)
+    this.X_1_vel(3) = this.X_dot(3*this.ind_1)
+
+    this.X_2_vel(1) = this.X_dot(3*this.ind_2 - 2)
+    this.X_2_vel(2) = this.X_dot(3*this.ind_2 - 1)
+    this.X_2_vel(3) = this.X_dot(3*this.ind_2)
+
+    this.X_3_vel(1) = this.X_dot(3*this.ind_3 - 2)
+    this.X_3_vel(2) = this.X_dot(3*this.ind_3 - 1)
+    this.X_3_vel(3) = this.X_dot(3*this.ind_3)
 
     CASE this.P_mat(i, 1, 2) OF
         1:
@@ -305,6 +525,14 @@ SUBROUTINE f_ext_sub(TENSEGRITY this^)
       this.normal(k) = this.normal(k) / this.normal_norm
     REPEAT
 
+    this.det_T = (this.X_2(1)-this.X_3(1))*(this.X_1(3)-this.X_3(3)) + (this.X_3(3)-this.X_2(3))*(this.X_1(1)-this.X_3(1))
+    this.dlambda1_dx = (this.X_2(1)-this.X_3(1))/this.det_T
+    this.dlambda1_dy = (this.X_3(3)-this.X_2(3))/this.det_T
+    this.dlambda2_dx = (this.X_3(1)-this.X_1(1))/this.det_T
+    this.dlambda2_dy = (this.X_1(3)-this.X_3(3))/this.det_T
+    this.dlambda3_dx = (this.X_1(1)-this.X_2(1))/this.det_T
+    this.dlambda3_dy = (this.X_2(3)-this.X_1(3))/this.det_T
+
     LOOP FOR j = 1 TO (this.n_int-1)^2
       this.lambda_1 = this.bar_lambda_mat(j, 1)
       this.lambda_2 = this.bar_lambda_mat(j, 2)
@@ -314,7 +542,7 @@ SUBROUTINE f_ext_sub(TENSEGRITY this^)
       this.x(2) = this.lambda_1*this.X_1(2) + this.lambda_2*this.X_2(2) + this.lambda_3*this.X_3(2)
       this.x(3) = this.lambda_1*this.X_1(3) + this.lambda_2*this.X_2(3) + this.lambda_3*this.X_3(3)
 
-      df_comp(this)
+      df_comp(this, var, deltax, deltay, deltaz)
 
       IF this.P_mat(i, 1, 2) = 0 AND this.ind_1 <= this.n_B THEN
         this.f_ext(3*this.ind_1-2) = this.f_ext(3*this.ind_1-2) + this.lambda_1*this.df(1)
@@ -353,7 +581,9 @@ END B_con_comp
 
 SUBROUTINE T_con_comp(TENSEGRITY this^)
 
-    ARRAY(this.n_C, 10) OF INTEGER Ten_cell_up
+    ARRAY(this.n_C, 10) OF INTEGER Ten_cell_up = 0
+
+    INTEGER ind = 0, r_con, u_con
 
     LOOP FOR j = 1 TO this.nx AND i = 1 TO this.nz
 
@@ -1795,13 +2025,13 @@ SUBROUTINE bar_lambda_comp(TENSEGRITY this^)
 
     ARRAY(FLOOR(this.n_int*(this.n_int+1)/2), 3) OF REAL lambda_mat = 0
 
-    REAL d_lambda = 1.0/(this.n_int-1)
+    this.d_lambda = 1 / (this.n_int-1)
     REAL lambda_1, lambda_2, lambda_3 = 0
 
     LOOP FOR i = 0 TO this.n_int-1
         LOOP FOR j = 0 TO this.n_int-i-1
-            lambda_3 = i*d_lambda
-            lambda_2 = j*d_lambda
+            lambda_3 = i*this.d_lambda
+            lambda_2 = j*this.d_lambda
             lambda_1 = 1.0 - lambda_2 - lambda_3
 
             lambda_mat(FLOOR(j+i*(2*this.n_int+1-i)/2+1), 1) = lambda_1
@@ -2239,14 +2469,14 @@ SUBROUTINE find_panel(TENSEGRITY this^; REAL x,y)
 END find_panel
 
 
-SUBROUTINE K_i_compute(TENSEGRITY this^; INTEGER K_ind)
+SUBROUTINE K_i_compute(TENSEGRITY this^; INTEGER K_ind; ARRAY(*,*,*) OF VARS var; REAL deltax, deltay, deltaz)
 
-    X_comp(this)
-    X_dot_comp(this)
+    !X_comp(this)
+    !X_dot_comp(this)
     
     f_n_comp(this)
     
-    f_ext_sub(this)
+    f_ext_sub(this, var, deltax, deltay, deltaz)
 
     LOOP FOR i = 1 TO 3*this.n_B
         this.f_n(i) = this.f_n(i) + this.f_ext(i)
@@ -2268,31 +2498,52 @@ SUBROUTINE K_i_compute(TENSEGRITY this^; INTEGER K_ind)
 END K_i_compute
 
 
-SUBROUTINE timestep_tensegrity(TENSEGRITY this^; REAL deltat)
+SUBROUTINE timestep_tensegrity_old(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var, temp; REAL deltat, deltax, deltay, deltaz; INTEGER nx,ny,nz)
+    !{LOOP FOR ALL ix AND ALL iy
+        this.p_ave = this.p_ave + var(ix,iy,nz-1).p
+    REPEAT
+    this.p_ave = this.p_ave / ((nx+2)*(ny+2))
 
     this.q_tilde_old = this.q_tilde
-    K_i_compute(this, 1)
+    K_i_compute(this, 1, var, deltax, deltay, deltaz)
 
     LOOP FOR i = 1 TO this.n_q_tilde
         this.q_tilde(i) = this.q_tilde_old(i) + deltat/2*this.K_mat(i,1)
     REPEAT
     this.time = this.time + 0.5*deltat
-    K_i_compute(this, 2)
+    K_i_compute(this, 2, var, deltax, deltay, deltaz)
 
     LOOP FOR i = 1 TO this.n_q_tilde
         this.q_tilde(i) = this.q_tilde_old(i) - deltat*this.K_mat(i,1) + 2*deltat*this.K_mat(i,2)
     REPEAT
     this.time = this.time + 0.5*deltat
-    K_i_compute(this, 3)
+    K_i_compute(this, 3, var, deltax, deltay, deltaz)
 
     LOOP FOR i = 1 TO this.n_q_tilde
         this.q_tilde(i) = this.q_tilde_old(i) + deltat*[1/6*this.K_mat(i,1) + 2/3*this.K_mat(i,2) + 1/6*this.K_mat(i,3)] 
+    REPEAT!}
+
+    K_i_compute(this, 1, var, deltax, deltay, deltaz)
+    LOOP FOR i = 1 TO this.n_q_tilde
+        this.q_tilde(i) = this.q_tilde(i) + deltat*this.K_mat(i,1) 
+    REPEAT
+
+    X_comp(this)
+    X_dot_comp(this)
+END timestep_tensegrity_old
+
+SUBROUTINE timestep_tensegrity(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltat, deltax, deltay, deltaz; INTEGER nx,ny,nz)
+
+    this.q_tilde_old = this.q_tilde
+    K_i_compute(this, 1, var, deltax, deltay, deltaz)
+
+    LOOP FOR i = 1 TO this.n_q_tilde
+        this.q_tilde(i) = this.q_tilde_old(i) + deltat*this.K_mat(i,1)
     REPEAT
 
     X_comp(this)
     X_dot_comp(this)
 END timestep_tensegrity
-
 
 
 SUBROUTINE mat_to_csv_real(ARRAY(*,*) OF REAL arr; STRING file_name)

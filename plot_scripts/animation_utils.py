@@ -5,15 +5,15 @@ from plot_utils import plot_tens
 from functools import partial
 
 def updatefig(i, fig, q_tilde, X_0, P_mat, P_mat_per, l_b, 
-              n_N, n_G, ghost_nodes, nx, ny, l_per, instant_jump):
+              n_N, n_G, ghost_nodes, nx, ny, l_per, h, instant_jump):
     fig.clear()
     plot_tens(fig, q_tilde[:,i*instant_jump], X_0, P_mat, P_mat_per, l_b, n_N,
-               n_G, ghost_nodes, nx, ny, l_per)
+               n_G, ghost_nodes, nx, ny, l_per, h)
 
 
 def fabric_animation(q_tilde, t, video_duration, fps, X_0,
                       P_mat, P_mat_per, l_b, n_N, n_G, 
-                      ghost_nodes, nx, ny, l_per):
+                      ghost_nodes, nx, ny, l_per, h):
     dt = t[1] - t[0]
     T  = t[-1] - t[0]
     frame_number = int(fps * video_duration)
@@ -26,12 +26,12 @@ def fabric_animation(q_tilde, t, video_duration, fps, X_0,
                                      q_tilde=q_tilde, 
                                      X_0=X_0, P_mat=P_mat, P_mat_per=P_mat_per, l_b=l_b,
                                      n_N=n_N, n_G=n_G, ghost_nodes=ghost_nodes,
-                                     nx=nx, ny=ny, l_per=l_per, 
+                                     nx=nx, ny=ny, l_per=l_per, h=h, 
                                      instant_jump=instant_jump),
                         frames=frames)
 
 
-    anim.save("./output_media/animation.mp4", fps=fps)
+    anim.save("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/output_media/animation.mp4", fps=fps)
 
 
 
