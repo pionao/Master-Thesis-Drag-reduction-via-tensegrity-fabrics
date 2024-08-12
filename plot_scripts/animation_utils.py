@@ -20,6 +20,8 @@ def fabric_animation(q_tilde, t, video_duration, fps, X_0,
     frames = np.asarray(range(frame_number))
     dt_frames = T / (frame_number-1)
     instant_jump = int(dt_frames/dt)
+
+    instant_jump = 1 ##############
     
     fig = plt.figure(figsize=(19.2, 10.8))
     anim = animation.FuncAnimation(fig, partial(updatefig, fig=fig,
@@ -31,7 +33,7 @@ def fabric_animation(q_tilde, t, video_duration, fps, X_0,
                         frames=frames)
 
 
-    anim.save("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/output_media/animation.mp4", fps=fps)
+    anim.save("/media/lorenzo/Hard Disk 2/output_codice_tesi/output_turb_mov/output_media/animation.mp4", fps=fps)
 
 
 

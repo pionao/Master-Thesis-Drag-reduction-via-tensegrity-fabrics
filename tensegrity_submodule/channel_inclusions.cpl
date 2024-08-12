@@ -69,6 +69,18 @@ SUBROUTINE readInputFile(TENSEGRITY_INIT this^; STRING fname)
      this.n_tri_int = (this.n_int-1)^2
 END readInputFile
 
+SUBROUTINE updateTens(TENSEGRITY_INIT this^)
+     this.n_C       = this.nx*this.nz
+     this.n_B       = 4*this.nx*this.nz
+     this.n_T       = 12*(this.nx-1)*(this.nz-1) - 3*((this.nx-2)*(this.nz-1)+(this.nz-2)*(this.nx-1)) + 3*4 + 3*(this.nx-2) + 3*(this.nz-2) + 4*this.nx*this.nz
+     this.n_G       = 2*this.nx + 2*this.nz
+     this.n_N       = this.n_C * 8 + this.n_G
+     this.n_N_dof   = 3*this.n_N
+     this.n_T_dof   = 3*this.n_T
+     this.n_q_tilde = 2*2*this.n_B
+     this.n_P       = 6*(this.nx+2)*(this.nz+2) + 2*(this.nx+1)*(this.nz+1)
+END updateTens
+
 SUBROUTINE initilizeTensegrity(TENSEGRITY this^; TENSEGRITY_INIT tensegrity_init)
      this.rho_b = tensegrity_init.rho_b
      this.k     = tensegrity_init.k
@@ -151,8 +163,6 @@ SUBROUTINE X_dot_comp(TENSEGRITY this^)
 END X_dot_comp
 
 SUBROUTINE X_comp(TENSEGRITY this^)
-
-    !this.X = this.X_0
 
     LOOP FOR i = 1 TO FLOOR((this.n_N-this.n_G)/2)
         this.X(3*i-2) = this.X_0(3*i-2+3*FLOOR((this.n_N-this.n_G)/2)) + this.l_b*SIN(this.q_tilde(2*i-1+(this.n_N-this.n_G)))*COS(this.q_tilde(2*i+(this.n_N-this.n_G)))

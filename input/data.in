@@ -1,12 +1,12 @@
-nx=270
-ny=48
-nz=200
+nx=120
+ny=104
+nz=182
 Lx=6.28
 Ly=2
 Lz=2
-nu=0.00012
+nu=0.0055555
 Tin=0
-itc=800000
+itc=40
 fromfield=0
 deltat=0.001
 time_max=10

@@ -24,18 +24,72 @@ REAL ww,delta,xx,yy,time_max
 INTEGER izu,izv,izw,fromfield
 myname=basename(COMMANDLINE(0))
 
+!FILE in_data=OPEN("input/data.in")
+!READ BY NAME FROM in_data nx,ny,nz,Lx,Ly,Lz,nu,Tin,itc,fromfield,deltat,time_max,it_max ! some data is overwritten if myname.field is present
+
+REAL t=0
+
+USE modules/dns
+
+! IMPORT FIELD TURBOLENTO
+! Inputs
+! ==================================== 
+! Read input file
+DNS dns
+STRING filename=WRITE("./input/initial_field/dns.in")
+readInputFile(dns,filename)
+
+! Read parameters and grid from restart file
+FILE savedfield_turb=OPENRO("input/initial_field/Field.fld")
+IF savedfield_turb#NULL THEN
+STRING filename=WRITE("input/initial_field/Field.fld")
+readRestartFile(dns, filename)
+END IF
+
+! Initialization
+! ==================================== 
+ARRAY[1..dns.size_turb(0),1..dns.size_turb(1),0..dns.size_turb(2)] OF VARS var_turb_field = 0
+
+! Read data from the .field file
+! ------
+POINTER TO STORED STRUCTURE[INTEGER nxs,nys,nzs,its
+	REAL Lxs,Lys,headxs,headys,nus,times
+	REAL x(-2..2*dns.size_turb(0)+5)
+	REAL y(-2..2*dns.size_turb(1)+5)
+	REAL z(0..2*dns.size_turb(2))
+	ARRAY(1..dns.size_turb(0),1..dns.size_turb(1),0..dns.size_turb(2)) OF VARS v] stored_turb=OPENRO("input/initial_field/Field.fld")
+IF stored_turb#NULL THEN
+	IF TRUE THEN WRITE "Reading velocity from turbolent flow field file ..."
+  	var_turb_field(LO+1..HI-1,LO+1..HI-1)=stored_turb.v(var_turb_field.LO1+1..var_turb_field.HI1-1,var_turb_field.LO2+1..var_turb_field.HI2-1)
+ELSE
+END IF
+IF stored_turb#NULL THEN CLOSE stored_turb
+
 FILE in_data=OPEN("input/data.in")
 READ BY NAME FROM in_data nx,ny,nz,Lx,Ly,Lz,nu,Tin,itc,fromfield,deltat,time_max,it_max ! some data is overwritten if myname.field is present
 
-REAL t=0
+! MODIFICHE DNS E TENSEGRITY PER FIELD TURBOLENTO
+nx = dns.size_turb(0)
+ny = dns.size_turb(1)
+Lx = dns.leng_turb(0)
+REAL l_per_comp = Lx/tensegrity_init.nz
+tensegrity_init.nx = FLOOR(tensegrity_init.nz/2)
+Ly = tensegrity_init.nx*l_per_comp
+tensegrity_init.r = l_per_comp / (2*SQRT(2-SQRT(2)))
+REAL deltaz=dns.leng_turb(2)/dns.size_turb(2)
+INTEGER ny_cell = FLOOR(0.51/deltaz)
+tensegrity_init.h = deltaz*ny_cell
+nz = dns.size_turb(2) + ny_cell
+Lz = Lz + tensegrity_init.h
+headx = dns.headx_turb
+nu = dns.nu_turb
+updateTens(tensegrity_init)
+
 
 INTEGER n_t = FLOOR(it_max / itc)
 TENSEGRITY(tensegrity_init.nx, tensegrity_init.nz, tensegrity_init.n_C, tensegrity_init.n_B, tensegrity_init.n_T, tensegrity_init.n_G, tensegrity_init.n_N, tensegrity_init.n_N_dof, tensegrity_init.n_T_dof, 
            tensegrity_init.n_q_tilde, tensegrity_init.n_P, tensegrity_init.n_int, tensegrity_init.n_tri_int, n_t, 2*(nx+2), 2*(ny+2), 2*tensegrity_init.n_B, 3*tensegrity_init.n_B, 3*tensegrity_init.n_G) tensegrity
 initilizeTensegrity(tensegrity, tensegrity_init)
-Lx = tensegrity.nz*tensegrity.l_per
-Ly = tensegrity.nx*tensegrity.l_per
-Lz = Lz + 2*tensegrity.h
 tensegrity.time = t
 LOOP FOR i = 1 TO n_t
   tensegrity.t_vec(i) = (i-1)*deltat
@@ -61,7 +115,7 @@ tensegrity.k_end = tensegrity.k
 ! Salvataggio parametri tensegrity
 ARRAY(10) OF INTEGER par_int_arr = (tensegrity.nx, tensegrity.nz, tensegrity.n_C, tensegrity.n_B, tensegrity.n_T,
                                     tensegrity.n_G, tensegrity.n_N, tensegrity.n_N_dof, tensegrity.n_T_dof, tensegrity.n_q_tilde)
-ARRAY(2) OF REAL par_real_arr = (tensegrity.l_b, tensegrity.l_per)
+ARRAY(3) OF REAL par_real_arr = (tensegrity.l_b, tensegrity.l_per, tensegrity.h)
 vec_to_csv_int(par_int_arr, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_parameters/par_int_arr.csv")
 vec_to_csv_real(par_real_arr, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_parameters/par_real_arr.csv")
 vec_to_csv_real(tensegrity.X_0, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/X_0.csv")
@@ -78,7 +132,7 @@ WRITE '#########################################################################
 FILE savedfield=OPENRO(""myname".field")
 IF savedfield#NULL THEN READ BY NAME FROM savedfield nx,ny,nz,Lx,Ly,nu,deltat
 
-deltax=Lx/nx; deltay=Ly/ny; deltaz=Lz/nz
+deltax=Lx/nx; deltay=Ly/ny
 
 !UFR=WALLS*(1-Uconv)
 UFR=0
@@ -90,9 +144,14 @@ zz=^zd(2*(*))
 !VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
 ARRAY[nxl(nx)-1..nxh(nx)+1,nyl(ny)-1..nyh(ny)+1,0..nz] OF VARS var=0,old
 
-!Imposizione headx
-!headx = (8000*nu^2)/(Lz-2*tensegrity.h)^3
-headx = 1
+! IMPOSIZIONE FIELD TURBOLENTO
+REAL scaling_factor = 1
+LOOP FOR ix = 1 TO nx AND iy = 1 TO ny AND iz = 0 TO dns.size_turb(2)
+  var(ix,iy,iz+ny_cell).p = var_turb_field(ix,iy,iz).p
+  var(ix,iy,iz+ny_cell).u = scaling_factor*var_turb_field(ix,iy,iz).u
+  var(ix,iy,iz+ny_cell).v = scaling_factor*var_turb_field(ix,iy,iz).v
+  var(ix,iy,iz+ny_cell).w = scaling_factor*var_turb_field(ix,iy,iz).w
+REPEAT
 
 USE parallelbcs
 USE iofiles
@@ -110,9 +169,13 @@ BOOLEAN FUNCTION bwall(REAL x,y,z; TENSEGRITY this^)
 
   RESULT=z<wall(x,y,tensegrity)
 END bwall
-BOOLEAN FUNCTION twall(REAL x,y,z; TENSEGRITY this^)
+!{BOOLEAN FUNCTION twall(REAL x,y,z; TENSEGRITY this^)
 
     RESULT=z>wall(x,y,tensegrity) + Lz - 2*tensegrity.h
+END twall!}
+BOOLEAN FUNCTION twall(REAL x,y,z; TENSEGRITY this^)
+
+    RESULT=z>Lz + tensegrity.h
 END twall
 REAL FUNCTION bwbc(REAL x,y; TENSEGRITY this^)
 
@@ -120,11 +183,15 @@ REAL FUNCTION bwbc(REAL x,y; TENSEGRITY this^)
           this.bar_weights(2)*this.vert_vel_zy(2) +
           this.bar_weights(3)*this.vert_vel_zy(3)
 END bwbc
-REAL FUNCTION twbc(REAL x,y; TENSEGRITY this^)
+!{REAL FUNCTION twbc(REAL x,y; TENSEGRITY this^)
 
   RESULT= this.bar_weights(1)*this.vert_vel_zy(1) +
           this.bar_weights(2)*this.vert_vel_zy(2) +
           this.bar_weights(3)*this.vert_vel_zy(3)
+END twbc!}
+REAL FUNCTION twbc(REAL x,y; TENSEGRITY this^)
+
+  RESULT= 0
 END twbc
 
 USE timestep
@@ -218,7 +285,7 @@ USE timestep
     DO var(ix,iy,iz).w=bwbc(ix*deltax,iy*deltay,tensegrity) FOR iz=0 TO bwimbc(ix,iy).LO-1; DO var(ix,iy,iz).w=twbc(ix*deltax,iy*deltay,tensegrity) FOR iz=twimbc(ix,iy).HI+1 TO nz
    REPEAT
 
-ARRAY(it_max) OF REAL press_max_vec
+savefield("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/field_output/undwall_0.field")
 
 IF iproc=1 THEN WRITE 'Starting the time loop ...'
 LOOP timeloop WHILE it < it_max AND t < time_max
@@ -243,8 +310,7 @@ LOOP timeloop WHILE it < it_max AND t < time_max
 
   INC it; t=~+deltat
   tensegrity.time = t
-  LOOP FOR ALL ix
-    iy=buimbc.LO2
+  LOOP FOR ALL ix AND ALL iy
     FREE buimbc(ix,iy), bvimbc(ix,iy), bwimbc(ix,iy), tuimbc(ix,iy), tvimbc(ix,iy), twimbc(ix,iy)
   REPEAT
   output
@@ -266,49 +332,7 @@ LOOP timeloop WHILE it < it_max AND t < time_max
     savefield("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/field_output/"myname"_"nop".field")
     vec_to_csv_real(tensegrity.q_tilde, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/time_serie/q_tilde_"nop".csv")
   END IF
-
-  
-  LOOP FOR ALL ix,iy,iz
-    IF ABS[var(ix,iy,iz).p] > tensegrity.p_max THEN
-      tensegrity.p_max = ABS[var(ix,iy,iz).p]
-      ix_max = ix
-      iy_max = iy
-      iz_max = iz
-    END IF
-  REPEAT
-  press_max_vec(it) = tensegrity.p_max
-  !WRITE tensegrity.p_max, ix_max, iy_max, iz_max
-  tensegrity.p_max = -1
-  ix_max = -1
-  iy_max = -1
-  iz_max = -1
- !{ WRITE tensegrity.disp_z_plus_max, tensegrity.disp_z_minus_max
-  WRITE tensegrity.vel_z_plus_max, tensegrity.vel_z_minus_max
-  tensegrity.disp_z_minus_max = 0
-  tensegrity.disp_z_plus_max = 0
-  tensegrity.vel_z_plus_max = 0
-  tensegrity.vel_z_minus_max = 0!}
-
-  LOOP FOR i = 1 TO FLOOR((tensegrity.n_N-tensegrity.n_G)/2)
-    IF tensegrity.X(3*i-1) - tensegrity.X_0(3*i-1) > tensegrity.disp_z_plus_max THEN
-      tensegrity.disp_z_plus_max = tensegrity.X(3*i-1) - tensegrity.X_0(3*i-1)
-    ELSE IF tensegrity.X(3*i-1) - tensegrity.X_0(3*i-1) < tensegrity.disp_z_minus_max THEN 
-      tensegrity.disp_z_minus_max = tensegrity.X(3*i-1) - tensegrity.X_0(3*i-1)
-    END IF
-    !{IF tensegrity.X_dot(3*i-1) > tensegrity.vel_z_plus_max THEN
-      tensegrity.vel_z_plus_max = tensegrity.X_dot(3*i-1)
-    ELSE IF tensegrity.X_dot(3*i-1) < tensegrity.vel_z_minus_max THEN 
-      tensegrity.vel_z_minus_max = tensegrity.X_dot(3*i-1)
-    END IF!}
-  REPEAT
-
 REPEAT timeloop
-
-ARRAY(2) OF REAL tens_output_data
-tens_output_data(1..2) = (tensegrity.disp_z_plus_max, tensegrity.disp_z_minus_max)
-vec_to_csv_real(tens_output_data, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/tens_output_data.csv")
-vec_to_csv_real(press_max_vec, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/press_max.csv")
-
 
 ! Finalisations
 ! ------------------------

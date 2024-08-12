@@ -6,7 +6,7 @@ from dof_utils import X_comp
 def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
             nx, nz, l_per, h):
     
-    k_value = 0.00002
+    k_value = 0.00006
 
     X = X_comp(q_tilde, X_0, l_b, n_N, n_G, ghost_nodes, nx, nz, l_per)
 
@@ -20,9 +20,10 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
     ax.set_xlabel('z')
     ax.set_ylabel('x')
     ax.set_zlabel('y')
+    ax.set_zticks([-10*k_value, 0.0, 10*k_value])
 
     #ax.w_zaxis.line.set_lw(0.)
-    ax.set_zticks([])
+    #ax.set_zticks([])
 
     #ax.set_axis_off()
 
