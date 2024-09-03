@@ -33,7 +33,7 @@ def fabric_animation(q_tilde, t, video_duration, fps, X_0,
                         frames=frames)
 
 
-    anim.save("/media/lorenzo/Hard Disk 2/output_codice_tesi/output_turb_mov/output_media/animation.mp4", fps=fps)
+    anim.save("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/output_media/animation.mp4", fps=fps)
 
 
 

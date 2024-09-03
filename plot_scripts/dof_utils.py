@@ -32,4 +32,20 @@ def X_comp(q_tilde, X_0, l_b, n_N, n_G, ghost_nodes, nx, nz, l_per):
 
     return X
          
-         
+
+def X_dot_comp(q_tilde, l_b, n_N, n_G, ghost_nodes):
+    X_dot = np.zeros((3*n_N))
+    for i in range((n_N-n_G)//2):
+        X_dot[3*i]   = l_b*(np.cos(q_tilde[2*i+(n_N-n_G)])*np.cos(q_tilde[2*i+1+(n_N-n_G)])*q_tilde[2*i]-np.sin(q_tilde[2*i+(n_N-n_G)])*np.sin(q_tilde[2*i+1+(n_N-n_G)])*np.sin(q_tilde[2*i+1+(n_N-n_G)])*q_tilde[2*i+1])
+        X_dot[3*i+1] = l_b*(np.cos(q_tilde[2*i+(n_N-n_G)])*np.sin(q_tilde[2*i+1+(n_N-n_G)])*q_tilde[2*i]+np.sin(q_tilde[2*i+(n_N-n_G)])*np.cos(q_tilde[2*i+1+(n_N-n_G)])*np.sin(q_tilde[2*i+1+(n_N-n_G)])*q_tilde[2*i+1])
+        X_dot[3*i+2] = -l_b*np.sin(q_tilde[2*i+(n_N-n_G)])*q_tilde[2*i]
+    for i in range(n_G):
+        ghost_ind  = ghost_nodes[i, 0]
+        parent_ind = ghost_nodes[i, 1]
+
+        X_dot[3*ghost_ind-3] = X_dot[3*parent_ind-3]
+        X_dot[3*ghost_ind-2] = X_dot[3*parent_ind-2]
+        X_dot[3*ghost_ind-1] = X_dot[3*parent_ind-1]
+    
+    return X_dot
+        

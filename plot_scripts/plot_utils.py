@@ -17,9 +17,9 @@ def plot_tens(fig, q_tilde, X_0, P_mat, P_mat_per, l_b, n_N, n_G, ghost_nodes,
     ax.set_ylim3d([-0.5*l_per, l_per*nx+0.5*l_per])
     ax.set_zlim3d([-k_value*10, k_value*10])
     ax.set_box_aspect((l_per*nz+0.25*l_per, l_per*nx+0.25*l_per, int((l_per*nx+0.25*l_per))/3))
-    ax.set_xlabel('z')
-    ax.set_ylabel('x')
-    ax.set_zlabel('y')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
     ax.set_zticks([-10*k_value, 0.0, 10*k_value])
 
     #ax.w_zaxis.line.set_lw(0.)

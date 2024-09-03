@@ -1,0 +1,58 @@
+!USE rtchecks
+
+FILE savedfield
+
+STRING output_path
+
+ARRAY(251) OF REAL u_arr=0,v_arr=0,w_arr=0
+
+INTEGER nx,ny,nz,it
+REAL Lx,Ly,nu,deltat,headx,heady,t
+
+VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
+output_path = "/media/lorenzo/HDD/output_codice_tesi/output/field_output/undwall_"0".field"
+WRITE output_path
+savedfield=OPENRO(output_path)
+READ BY NAME FROM savedfield nx,ny,nz,Lx,Ly,nu,deltat
+ARRAY[1..nx,1..ny,0..nz] OF VARS var=0
+CLOSE savedfield
+
+LOOP FOR i = 0 TO 250
+    WRITE i
+
+    output_path = "/media/lorenzo/HDD/output_codice_tesi/output/field_output/undwall_"i".field"
+
+    savedfield=OPENRO(output_path)
+    READ BY NAME FROM savedfield nx,ny,nz,Lx,Ly,nu,deltat
+
+    READ FROM savedfield
+    READ BY NAME FROM savedfield it,headx,heady
+    READ BY NAME FROM savedfield t
+    READ FROM savedfield
+    READ FROM savedfield
+    POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
+                                ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=savedfield
+    var(LO+1..HI-1,LO+1..HI-1)=stored.v(var.LO1+1..var.HI1-1,var.LO2+1..var.HI2-1)
+
+    CLOSE savedfield
+    FREE stored
+
+    u_arr(i) = var(FLOOR(nx/2), FLOOR(ny/2), FLOOR(182/2+(nz-182))).u
+    v_arr(i) = var(FLOOR(nx/2), FLOOR(ny/2), FLOOR(182/2+(nz-182))).v
+    w_arr(i) = var(FLOOR(nx/2), FLOOR(ny/2), FLOOR(182/2+(nz-182))).w
+REPEAT
+
+SUBROUTINE vec_to_csv_real(ARRAY(*) OF REAL arr; STRING file_name)
+
+    output_ = CREATE(file_name)
+
+    LOOP FOR i = LO(arr) TO HI(arr)
+        WRITE TO output_ arr(i) ./.
+        WRITE TO output_
+    REPEAT
+    CLOSE(output_)
+END vec_to_csv_real
+
+vec_to_csv_real(u_arr, "./u.csv")
+vec_to_csv_real(v_arr, "./v.csv")
+vec_to_csv_real(w_arr, "./w.csv")
