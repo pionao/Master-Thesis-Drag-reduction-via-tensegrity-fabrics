@@ -69,7 +69,7 @@ SUBROUTINE linestep[SUBROUTINE(REAL val^,oldrsd^,rsd) timescheme; INTEGER ix,iy;
       IF iz<=bwimbc(ix,iy).HI THEN new(iz,3)=new(iz,3)/[1+dts*bwimbc(ix,iy,iz)]+ \
                                               dts*bwimbc(ix,iy,iz)/[1+dts*bwimbc(ix,iy,iz)] * bwbc(ix*deltax,iy*deltay,this)
       IF iz>=twimbc(ix,iy).LO THEN new(iz,3)=new(iz,3)/[1+dts*twimbc(ix,iy,iz)]+ \
-                                              dts*twimbc(ix,iy,iz)/[1+dts*twimbc(ix,iy,iz)] * twbc(ix*deltax,iy*deltay)
+                                              dts*twimbc(ix,iy,iz)/[1+dts*twimbc(ix,iy,iz)] * twbc(ix*deltax,iy*deltay,this)
     END IF
   REPEAT
 END linestep
@@ -128,6 +128,7 @@ SUBROUTINE timestep[SUBROUTINE(REAL val^,oldrsd^,rsd) timescheme; TENSEGRITY thi
   pbcwait
   LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
     EXCEPT ix>var.LO1+1 AND ix<var.HI1-1 AND iy>var.LO2+1 AND iy<var.HI2-1
+    find_ind_panel(this,ix*deltax,iy*deltay,ix,iy,0,0)
     linestep(timescheme,ix,iy,dts,new(ix,iy),this)
   REPEAT
   var(LO+1..HI-1,LO+1..HI-1,1..nz-1,1..3)=new
@@ -165,7 +166,8 @@ SUBROUTINE timestep[SUBROUTINE(REAL val^,oldrsd^,rsd) timescheme; TENSEGRITY thi
 
   DO var(ix,iy,iz).v=~+(IF iz>bvimbc(ix,iy).HI AND iz<tvimbc(ix,iy).LO THEN dvm ELSE IF iz<=bvimbc(ix,iy).HI THEN dvm/[1+dts*bvimbc(ix,iy,iz)] ELSE dvm/[1+dts*tvimbc(ix,iy,iz)]) FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1 AND iz=bvimbc(ix,iy).LO TO tvimbc(ix,iy).HI
 
-  heady=~+dvm/dts
+  !heady=~+dvm/dts
+  heady = 0
 
 #endif
 

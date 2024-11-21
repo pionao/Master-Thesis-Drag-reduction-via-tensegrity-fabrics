@@ -1,0 +1,108 @@
+DNS = STRUCTURE[ STRUCTURED ARRAY(x,y,z) OF INTEGER size_turb;
+                 STRUCTURED ARRAY(x,y,z) OF STRUCTURED ARRAY(l, h) OF INTEGER localSize_turb;  
+                 STRUCTURED ARRAY(x,y,z) OF REAL leng_turb;
+                 REAL nu_turb;
+                 POINTER TO ARRAY(*) OF REAL xd_turb,yd_turb,zd_turb; 
+                 REAL headx_turb,heady_turb,UFR_turb,VFR_turb
+                 REAL cflmax_turb,fouriermax_turb, deltat_turb, maxTime_turb, time_turb
+                 INTEGER it_turb,it_save_turb,it_stat_turb,it_max_turb,it_cfl_turb,it_check_turb,it_runtimestats_turb, it_start_turb, it_end_turb, iz_stats_turb  
+                 BOOLEAN continue_turb
+                 INTEGER non_ph_turb
+               ]      
+                    
+SUBROUTINE readInputFile(DNS this^; STRING fname) FOLLOWS               
+SUBROUTINE readRestartFile(DNS this^; STRING fname) FOLLOWS     
+  
+    
+MODULE dns
+REAL FUNCTION scalex(REAL x)=x 
+REAL FUNCTION scaley(REAL x)=x 
+REAL FUNCTION scalez(REAL x)=tanh(1.5*x) 
+
+
+	SUBROUTINE readInputFile(DNS this^; STRING fname)
+		FILE dnsin=OPENRO(fname)
+		REAL UFR, VFR
+		REAL cflmax, fouriermax, maxTime
+		INTEGER it_save, it_stat, it_cfl, it_check
+		INTEGER it_runtimestats, it_start, it_end, iz_stats 
+		INTEGER non_ph
+		BOOLEAN continue
+		READ BY NAME FROM dnsin nu, headx, heady,UFR,VFR
+		READ BY NAME FROM dnsin nx, ny, nz, Lx, Ly, Lz
+		READ BY NAME FROM dnsin cflmax, fouriermax, deltat, maxTime
+		READ BY NAME FROM dnsin it_save, it_stat, it_max, it_cfl, it_check 
+		READ BY NAME FROM dnsin it_runtimestats, it_start, it_end, iz_stats 	
+		READ BY NAME FROM dnsin non_ph
+		READ BY NAME FROM dnsin continue
+	
+		this.continue_turb = continue
+		this.size_turb(0) = nx; this.size_turb(1) = ny; this.size_turb(2) = nz
+		this.leng_turb(0) = Lx; this.leng_turb(1) = Ly; this.leng_turb(2) = Lz
+		this.nu_turb = nu
+		this.xd_turb = NEW ARRAY(-2..2*nx+5) OF REAL
+		this.yd_turb = NEW ARRAY(-2..2*ny+5) OF REAL	
+		this.zd_turb = NEW ARRAY(0..2*nz) OF REAL
+		!REAL deltax_turb = Lx/nx
+		!REAL deltay_turb = Ly/ny 
+		DO this.xd_turb(ix)=Lx/2*(scalex(ix/nx-1)/scalex(1)+1) FOR ix= -2 TO 2*nx+5  
+		DO this.yd_turb(iy)=Ly/2*(scaley(iy/ny-1)/scaley(1)+1) FOR iy= -2 TO 2*ny+5			
+		DO this.zd_turb(iz) =Lz/2*(scalez(iz/nz-1)/scalez(1)+1) FOR iz=0 TO 2*nz 	
+		!DO this.zd(iz)=1-scalez[1-iz/(2*nz-1)]/scalez(1) FOR iz=0 TO 2*nz			
+		this.headx_turb=headx
+		this.heady_turb=heady
+		this.UFR_turb=UFR
+		this.VFR_turb=VFR
+		this.cflmax_turb=cflmax
+		this.fouriermax_turb=fouriermax
+		this.deltat_turb=deltat
+		this.maxTime_turb=maxTime
+		this.it_save_turb=it_save
+		this.it_stat_turb=it_stat
+		this.it_max_turb=it_max
+		this.it_cfl_turb=it_cfl
+		this.it_check_turb=it_check
+		this.it_runtimestats_turb=it_runtimestats
+		this.it_start_turb=it_start
+		this.it_end_turb=it_end
+		this.iz_stats_turb=iz_stats
+		this.time_turb=0
+		this.it_turb=0
+		this.non_ph_turb=non_ph
+	END readInputFile
+	
+	
+	
+	SUBROUTINE readRestartFile(DNS this^; STRING fname)
+	IF TRUE THEN WRITE "Reading turbolent flow field file ..."
+		POINTER TO STORED STRUCTURE[INTEGER nxs,nys,nzs,its
+					   REAL Lxs,Lys,headxs,headys,nus,times] dnsinfo=OPENRO(fname)
+		WITH dnsinfo:
+			this.size_turb(0) = nxs; this.size_turb(1) = nys; this.size_turb(2) = nzs
+			this.leng_turb(0) = Lxs; this.leng_turb(1) = Lys; !this.nu = nus
+		IF this.continue_turb THEN 
+        	   this.it_turb=its; this.headx_turb=headxs; this.heady_turb=headys
+        	   this.time_turb=times; this.nu_turb=dnsinfo.nus; 
+               END IF
+               END WITH
+               CLOSE dnsinfo
+		POINTER TO STORED STRUCTURE[INTEGER nxs,nys,nzs,its
+					    REAL Lxs,Lys,headxs,headys,nus,times
+					    REAL x(-2..2*this.size_turb(0)+5)
+					    REAL y(-2..2*this.size_turb(1)+5)
+					    REAL z(0..2*this.size_turb(2))] stored=OPENRO(fname)
+				
+		WITH stored:
+			 this.xd_turb = NEW ARRAY(-2..2*this.size_turb(0)+5) OF REAL 
+			 this.xd_turb(*) = x
+             this.yd_turb = NEW ARRAY(-2..2*this.size_turb(1)+5) OF REAL 
+			 this.yd_turb(*) = y
+			 this.zd_turb = NEW ARRAY(0..2*this.size_turb(2)) OF REAL 
+			 this.zd_turb(*) = z
+             this.leng_turb(2) = this.zd_turb(HI)-this.zd_turb(LO)         ! This should be checked for walls=1 and 2 XXX TODO 
+                CLOSE stored
+	END readRestartFile
+	
+	
+	
+END dns

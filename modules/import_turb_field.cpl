@@ -1,0 +1,37 @@
+!USE rtchecks
+USE modules/dns.cpl
+
+! Inputs
+! ==================================== 
+! Read input file
+DNS dns
+STRING filename=WRITE("./input/initial_field/dns.in")
+readInputFile(dns,filename)
+
+! Read parameters and grid from restart file
+FILE savedfield=OPENRO("input/initial_field/Field.fld")
+IF savedfield#NULL THEN
+STRING filename=WRITE("input/initial_field/Field.fld")
+readRestartFile(dns, filename)
+END IF
+
+! Initialization
+! ==================================== 
+ARRAY[1..dns.size_turb(0),1..dns.size_turb(1),0..dns.size_turb(2)] OF VARS var_turb_field = 0
+STRUCTURED ARRAY(x,y) OF REAL flowrate = 0
+
+
+! Read data from the .field file
+! ------
+POINTER TO STORED STRUCTURE[INTEGER nxs,nys,nzs,its
+	REAL Lxs,Lys,headxs,headys,nus,times
+	REAL x(-2..2*nx+5)
+	REAL y(-2..2*ny+5)
+	REAL z(0..2*nz)
+	ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=OPENRO("input/initial_field/Field.fld")
+IF stored#NULL THEN
+	IF TRUE THEN WRITE "Reading velocity from restart file ..."
+  	var_turb_field(LO+1..HI-1,LO+1..HI-1)=stored.v(var_turb_field.LO1+1..var_turb_field.HI1-1,var_turb_field.LO2+1..var_turb_field.HI2-1)
+ELSE
+END IF
+IF stored#NULL THEN CLOSE stored

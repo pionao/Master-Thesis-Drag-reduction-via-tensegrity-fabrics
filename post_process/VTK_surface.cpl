@@ -1,0 +1,22 @@
+USE rtchecks
+VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
+USE ../tensegrity_submodule/channel_inclusions
+
+INTEGER n_min, n_max
+
+ASK n_min, n_max
+
+LOOP FOR i = n_min TO n_max
+    WRITE i
+
+    file = OPEN("tensegrity_surface_out/tensegrity_surface_"i".vtk")
+    q_tilde_file = OPEN("/media/lorenzo/Hard Disk 2/")
+
+    WRITE TO file "# vtk DataFile Version 2.0" 
+    WRITE TO file "tensegrity_surface_"i".vtk"
+    WRITE TO file "ASCII"
+
+
+    CLOSE(file)
+
+REPEAT

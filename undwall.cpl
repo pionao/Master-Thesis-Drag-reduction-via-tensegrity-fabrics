@@ -1,13 +1,21 @@
 USE complex
 USE rbmat
 !USE rtchecks
+USE meanandvar
+
+
+!
+! ATTENZIONE FORZA SOLO PRESSIONE
+!
 
 
 ! Defines
 ! ------------------------
-!#define cpg
+#define cpg
 #define mpiverbose
 ! ------------------------
+
+VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
 
 ! Inclusioni Tensegrity
 USE tensegrity_submodule/channel_inclusions
@@ -22,35 +30,95 @@ REAL ww,delta,xx,yy,time_max
 INTEGER izu,izv,izw,fromfield
 myname=basename(COMMANDLINE(0))
 
+!FILE in_data=OPEN("input/data.in")
+!READ BY NAME FROM in_data nx,ny,nz,Lx,Ly,Lz,nu,Tin,itc,fromfield,deltat,time_max,it_max ! some data is overwritten if myname.field is present
+
+REAL t=0
+
+USE modules/dns
+
+! IMPORT FIELD TURBOLENTO
+! Inputs
+! ==================================== 
+! Read input file
+DNS dns
+STRING filename=WRITE("./input/initial_field/dns.in")
+readInputFile(dns,filename)
+
+! Read parameters and grid from restart file
+FILE savedfield_turb=OPENRO("input/initial_field/Field.fld")
+IF savedfield_turb#NULL THEN
+STRING filename=WRITE("input/initial_field/Field.fld")
+readRestartFile(dns, filename)
+END IF
+
+! Initialization
+! ==================================== 
+ARRAY[1..dns.size_turb(0),1..dns.size_turb(1),0..dns.size_turb(2)] OF VARS var_turb_field = 0
+
+! Read data from the .field file
+! ------
+POINTER TO STORED STRUCTURE[INTEGER nxs,nys,nzs,its
+	REAL Lxs,Lys,headxs,headys,nus,times
+	REAL x(-2..2*dns.size_turb(0)+5)
+	REAL y(-2..2*dns.size_turb(1)+5)
+	REAL z(0..2*dns.size_turb(2))
+	ARRAY(1..dns.size_turb(0),1..dns.size_turb(1),0..dns.size_turb(2)) OF VARS v] stored_turb=OPENRO("input/initial_field/Field.fld")
+IF stored_turb#NULL THEN
+	IF TRUE THEN WRITE "Reading velocity from turbolent flow field file ..."
+  	var_turb_field(LO+1..HI-1,LO+1..HI-1)=stored_turb.v(var_turb_field.LO1+1..var_turb_field.HI1-1,var_turb_field.LO2+1..var_turb_field.HI2-1)
+ELSE
+END IF
+IF stored_turb#NULL THEN CLOSE stored_turb
+
 FILE in_data=OPEN("input/data.in")
 READ BY NAME FROM in_data nx,ny,nz,Lx,Ly,Lz,nu,Tin,itc,fromfield,deltat,time_max,it_max ! some data is overwritten if myname.field is present
 
-REAL t=0
+! MODIFICHE DNS E TENSEGRITY PER FIELD TURBOLENTO
+nx = dns.size_turb(0)
+ny = dns.size_turb(1)
+Lx = dns.leng_turb(0)
+REAL l_per_comp = Lx/tensegrity_init.nz
+tensegrity_init.nx = FLOOR(tensegrity_init.nz/2)
+Ly = tensegrity_init.nx*l_per_comp
+tensegrity_init.r = l_per_comp / (2*SQRT(2-SQRT(2)))
+REAL deltaz=dns.leng_turb(2)/dns.size_turb(2)
+INTEGER ny_cell = FLOOR(0.51/deltaz)
+tensegrity_init.h = deltaz*ny_cell
+nz = dns.size_turb(2) + ny_cell
+Lz = Lz + tensegrity_init.h
+headx = dns.headx_turb
+nu = dns.nu_turb
+updateTens(tensegrity_init)
 
 INTEGER n_t = FLOOR(it_max / itc)
 TENSEGRITY(tensegrity_init.nx, tensegrity_init.nz, tensegrity_init.n_C, tensegrity_init.n_B, tensegrity_init.n_T, tensegrity_init.n_G, tensegrity_init.n_N, tensegrity_init.n_N_dof, tensegrity_init.n_T_dof, 
            tensegrity_init.n_q_tilde, tensegrity_init.n_P, tensegrity_init.n_int, tensegrity_init.n_tri_int, n_t, 2*(nx+2), 2*(ny+2), 2*tensegrity_init.n_B, 3*tensegrity_init.n_B, 3*tensegrity_init.n_G) tensegrity
 initilizeTensegrity(tensegrity, tensegrity_init)
-Lx = tensegrity.nz*tensegrity.l_per
-Ly = tensegrity.nx*tensegrity.l_per
 tensegrity.time = t
 LOOP FOR i = 1 TO n_t
   tensegrity.t_vec(i) = (i-1)*deltat
 REPEAT
+tensegrity.tens_it = 0
+tensegrity.nu = nu
+tensegrity.p_max = -1
+INTEGER ix_max=-1,iy_max=-1,iz_max=-1
+tensegrity.disp_z_plus_max = 0
+tensegrity.disp_z_minus_max = 0
+tensegrity.vel_z_plus_max = 0
+tensegrity.vel_z_minus_max = 0
 
 ! Salvataggio parametri tensegrity
 ARRAY(10) OF INTEGER par_int_arr = (tensegrity.nx, tensegrity.nz, tensegrity.n_C, tensegrity.n_B, tensegrity.n_T,
                                     tensegrity.n_G, tensegrity.n_N, tensegrity.n_N_dof, tensegrity.n_T_dof, tensegrity.n_q_tilde)
-ARRAY(2) OF REAL par_real_arr = (tensegrity.l_b, tensegrity.l_per)
-vec_to_csv_int(par_int_arr, "output/tensegrity_parameters/par_int_arr.csv")
-vec_to_csv_real(par_real_arr, "output/tensegrity_parameters/par_real_arr.csv")
-vec_to_csv_real(tensegrity.X_0, "output/tensegrity_output/X_0.csv")
-mat_to_csv_int(tensegrity.P_mat(*,*,1), "output/tensegrity_output/P_mat.csv")
-mat_to_csv_int(tensegrity.P_mat(*,*,2), "output/tensegrity_output/P_mat_per.csv")
-mat_to_csv_int(tensegrity.ghost_nodes, "output/tensegrity_output/ghost_nodes.csv")
-vec_to_csv_real(tensegrity.t_vec, "output/tensegrity_output/t_vec.csv")
-
-
+ARRAY(4) OF REAL par_real_arr = (tensegrity.l_b, tensegrity.l_per, tensegrity.h, tensegrity.r)
+vec_to_csv_int(par_int_arr, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_parameters/par_int_arr.csv")
+vec_to_csv_real(par_real_arr, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_parameters/par_real_arr.csv")
+vec_to_csv_real(tensegrity.X_0, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/X_0.csv")
+mat_to_csv_int(tensegrity.P_mat(*,*,1), "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/P_mat.csv")
+mat_to_csv_int(tensegrity.P_mat(*,*,2), "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/P_mat_per.csv")
+mat_to_csv_int(tensegrity.ghost_nodes, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/ghost_nodes.csv")
+vec_to_csv_real(tensegrity.t_vec, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/t_vec.csv")
 
 WRITE '########################################################################################################################################################'
 WRITE 'Data from data.in: '
@@ -63,19 +131,28 @@ IF savedfield#NULL THEN READ BY NAME FROM savedfield nx,ny,nz,Lx,Ly,nu,deltat
 deltax=Lx/nx; deltay=Ly/ny
 
 UFR=WALLS*(1-Uconv)
+!UFR=0
 VFR=0
 REAL FUNCTION scale(REAL x)=x
 INCLUDE parallelbcs.h
 REAL zd(0..2*nz)
 zz=^zd(2*(*))
-VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
 ARRAY[nxl(nx)-1..nxh(nx)+1,nyl(ny)-1..nyh(ny)+1,0..nz] OF VARS var=0,old
+
+! IMPOSIZIONE FIELD TURBOLENTO
+REAL scaling_factor = 1
+LOOP FOR ix = 1 TO nx AND iy = 1 TO ny AND iz = 0 TO dns.size_turb(2)
+  var(ix,iy,iz+ny_cell).p = var_turb_field(ix,iy,iz).p
+  var(ix,iy,iz+ny_cell).u = scaling_factor*var_turb_field(ix,iy,iz).u
+  var(ix,iy,iz+ny_cell).v = scaling_factor*var_turb_field(ix,iy,iz).v
+  var(ix,iy,iz+ny_cell).w = scaling_factor*var_turb_field(ix,iy,iz).w
+REPEAT
 
 USE parallelbcs
 USE iofiles
 ! rescale zd
 DO zd(iz)=iz/nz FOR iz=0 TO 2*nz
-zd=Lz*zd/2.0 
+zd=Lz*zd/2.0
 
 REAL FUNCTION wall(REAL x,y; TENSEGRITY this^)
 
@@ -89,7 +166,7 @@ BOOLEAN FUNCTION bwall(REAL x,y,z; TENSEGRITY this^)
 END bwall
 BOOLEAN FUNCTION twall(REAL x,y,z; TENSEGRITY this^)
 
-    RESULT=z>2.4
+    RESULT=z>Lz + tensegrity.h
 END twall
 REAL FUNCTION bwbc(REAL x,y; TENSEGRITY this^)
 
@@ -97,12 +174,10 @@ REAL FUNCTION bwbc(REAL x,y; TENSEGRITY this^)
           this.bar_weights(2)*this.vert_vel_zy(2) +
           this.bar_weights(3)*this.vert_vel_zy(3)
 END bwbc
-REAL FUNCTION twbc(REAL x,y)
+REAL FUNCTION twbc(REAL x,y; TENSEGRITY this^)
 
-  RESULT=0
+  RESULT= 0
 END twbc
-
-
 
 USE timestep
 
@@ -153,34 +228,30 @@ END calcoef
 SUBROUTINE calcimbc(TYPEOF(buimbc) bimbc^,timbc^; INTEGER dix,diy,diz; TENSEGRITY this^)
   d2x=1/deltax/deltax; d2y=1/deltay/deltay
   LOOP FOR ix=bimbc.LO1 TO bimbc.HI1 AND iy=bimbc.LO2 TO bimbc.HI2
-    IF iy=bimbc.LO2 THEN
-      x=(ix+0.5*dix)*deltax; y=(iy+0.5*diy)*deltay
-      find_ind_panel(this,x,y,ix,iy,dix,diy)
-      INTEGER izlo=0
-      DO INC izlo WHILE bwall[x,y,zd(2*izlo+diz),this]
-      INTEGER izhi=izlo
-      LOOP FOR iz=izlo+1 TO nz-1-diz
-        z=zd(2*iz+diz)
-        IF bwall(x,y,z,this) OR bwall[x+deltax,y,z,this] OR
-            bwall[x-deltax,y,z,this] OR bwall[x,y+deltay,z,this] OR
-            bwall[x,y-deltay,z,this] OR bwall[x,y,zd(2*iz+2+diz),this] OR
-            bwall[x,y,zd(2*iz-2+diz),this] THEN izhi=iz
-      REPEAT
-      calcoef(bwall,bimbc(ix,iy),izlo,izhi,ix,iy,dix,diy,diz,this)
-      izhi=[IF diz=1 THEN nz-1 ELSE nz]
-      DO izhi=~-1 WHILE twall[x,y,zd(2*izhi+diz),this]
-      izlo=izhi
-      LOOP FOR iz=izhi-1 DOWN TO 1
-        z=zd(2*iz+diz)
-        IF twall(x,y,z,this) OR twall[x+deltax,y,z,this] OR
-            twall[x-deltax,y,z,this] OR twall[x,y+deltay,z,this] OR
-            twall[x,y-deltay,z,this] OR twall[x,y,zd(2*iz+2+diz),this] OR
-            twall[x,y,zd(2*iz-2+diz),this] THEN izlo=iz
-      REPEAT
-      calcoef(twall,timbc(ix,iy),izlo,izhi,ix,iy,dix,diy,diz,this)
-    ELSE
-      bimbc(ix,iy)=bimbc(ix,LO); timbc(ix,iy)=timbc(ix,LO) 
-    END IF
+    x=(ix+0.5*dix)*deltax; y=(iy+0.5*diy)*deltay
+    find_ind_panel(this,x,y,ix,iy,dix,diy)
+    INTEGER izlo=0
+    DO INC izlo WHILE bwall[x,y,zd(2*izlo+diz),this]
+    INTEGER izhi=izlo
+    LOOP FOR iz=izlo+1 TO nz-1-diz
+      z=zd(2*iz+diz)
+      IF bwall(x,y,z,this) OR bwall[x+deltax,y,z,this] OR
+          bwall[x-deltax,y,z,this] OR bwall[x,y+deltay,z,this] OR
+          bwall[x,y-deltay,z,this] OR bwall[x,y,zd(2*iz+2+diz),this] OR
+          bwall[x,y,zd(2*iz-2+diz),this] THEN izhi=iz
+    REPEAT
+    calcoef(bwall,bimbc(ix,iy),izlo,izhi,ix,iy,dix,diy,diz,this)
+    izhi=[IF diz=1 THEN nz-1 ELSE nz]
+    DO izhi=~-1 WHILE twall[x,y,zd(2*izhi+diz),this]
+    izlo=izhi
+    LOOP FOR iz=izhi-1 DOWN TO 1
+      z=zd(2*iz+diz)
+      IF twall(x,y,z,this) OR twall[x+deltax,y,z,this] OR
+          twall[x-deltax,y,z,this] OR twall[x,y+deltay,z,this] OR
+          twall[x,y-deltay,z,this] OR twall[x,y,zd(2*iz+2+diz),this] OR
+          twall[x,y,zd(2*iz-2+diz),this] THEN izlo=iz
+    REPEAT
+    calcoef(twall,timbc(ix,iy),izlo,izhi,ix,iy,dix,diy,diz,this)
   REPEAT
 END calcimbc
 
@@ -192,6 +263,19 @@ USE timestep
    calcimbc(bvimbc,tvimbc,0,1,0,tensegrity)
    calcimbc(bwimbc,twimbc,0,0,1,tensegrity)
 
+   LOOP FOR ALL ix AND ALL iy
+    find_ind_panel(tensegrity,ix*deltax,iy*deltay,ix,iy,0,0)
+    DO var(ix,iy,iz).u=0 FOR iz=0 TO buimbc(ix,iy).LO-1; DO var(ix,iy,iz).u=0 FOR iz=tuimbc(ix,iy).HI+1 TO nz
+    DO var(ix,iy,iz).v=0 FOR iz=0 TO bvimbc(ix,iy).LO-1; DO var(ix,iy,iz).v=0 FOR iz=tvimbc(ix,iy).HI+1 TO nz
+    DO var(ix,iy,iz).w=bwbc(ix*deltax,iy*deltay,tensegrity) FOR iz=0 TO bwimbc(ix,iy).LO-1; DO var(ix,iy,iz).w=twbc(ix*deltax,iy*deltay,tensegrity) FOR iz=twimbc(ix,iy).HI+1 TO nz
+   REPEAT
+
+savefield("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/field_output/undwall_0.field")
+
+UFR_file = OPEN("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/UFR.csv")
+REAL UFR_comp
+
+deltat=0.001
 
 IF iproc=1 THEN WRITE 'Starting the time loop ...'
 LOOP timeloop WHILE it < it_max AND t < time_max
@@ -200,99 +284,43 @@ LOOP timeloop WHILE it < it_max AND t < time_max
   cfl=tau*deltat
   deltat=cfl/tau!}
 
-
-  LOOP FOR ALL ix AND ALL iy
-    find_ind_panel(tensegrity,ix*deltax,iy*deltay,ix,iy,0,0)
-    DO var(ix,iy,iz).u=0 FOR iz=0 TO buimbc(ix,iy).LO-1; DO var(ix,iy,iz).u=0 FOR iz=tuimbc(ix,iy).HI+1 TO nz
-    DO var(ix,iy,iz).v=0 FOR iz=0 TO bvimbc(ix,iy).LO-1; DO var(ix,iy,iz).v=0 FOR iz=tvimbc(ix,iy).HI+1 TO nz
-    DO var(ix,iy,iz).w=bwbc(ix*deltax,iy*deltay,tensegrity) FOR iz=0 TO bwimbc(ix,iy).LO-1; DO var(ix,iy,iz).w=twbc(ix*deltax,iy*deltay) FOR iz=twimbc(ix,iy).HI+1 TO nz
-  REPEAT
-
   timestep(rai1, tensegrity) 
   timestep(rai2, tensegrity)
   timestep(rai3, tensegrity)
 
-  timestep_tensegrity(tensegrity, deltat)
+
+  timestep_tensegrity(tensegrity, var, deltat, deltax, deltay, deltaz, nx, ny, nz)
+  INC tensegrity.tens_it
+
 
   INC it; t=~+deltat
-  LOOP FOR ALL ix
-    iy=buimbc.LO2
+  tensegrity.time = t
+  LOOP FOR ALL ix AND ALL iy
     FREE buimbc(ix,iy), bvimbc(ix,iy), bwimbc(ix,iy), tuimbc(ix,iy), tvimbc(ix,iy), twimbc(ix,iy)
   REPEAT
-  output
-
-  !IF it MOD 100 = 0 THEN savefield("undwall.field")
-  IF t>=Tin AND it MOD itc = 0 THEN
-    INC nop 
-    savefield("output/field_output/"myname"_"nop".field")
-    vec_to_csv_real(tensegrity.q_tilde, "output/tensegrity_output/time_serie/q_tilde_"nop".csv")
-  END IF 
-
+  output(UFR_comp)
 
    calcimbc(buimbc,tuimbc,1,0,0, tensegrity)
    calcimbc(bvimbc,tvimbc,0,1,0, tensegrity)
    calcimbc(bwimbc,twimbc,0,0,1, tensegrity)
 
-  timestep_tensegrity(tensegrity, deltat) 
-
-!{
-   ! experimental XXX
-WRITE BY NAME tvimbc(5,1).LO
-WRITE BY NAME tvimbc(5,1).HI
-WRITE BY NAME bvimbc(5,1).LO
-WRITE BY NAME bvimbc(5,1).HI
-
-WRITE BY NAME tuimbc(5,1)
-WRITE BY NAME tvimbc(5,30)
-WRITE BY NAME twimbc(5,1)
-
-WRITE BY NAME buimbc(5,1)
-WRITE BY NAME bvimbc(5,30)
-WRITE BY NAME bwimbc(5,1)
-
-   LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
-      xx=(ix+0.5)*deltax; yy=iy*deltay
-      izu=buimbc(ix,iy).LO
-      WITH var(ix+*,iy+*,izu+*)
-         delta=zz(izu)-wall(xx,yy,t)
-         u(0,0,0) = u(0,0,1)/(zz(izu+1)-zz(izu) + delta)*delta
-      END WITH
-      izu=tuimbc(ix,iy).HI
-      WITH var(ix+*,iy+*,izu+*)
-         delta= 2.-wall(xx,yy,t) - zz(izu)
-         u(0,0,0) = u(0,0,-1)/(zz(izu)-zz(izu-1)+delta)*delta
-      END WITH
-
-      xx=ix*deltax; yy=(iy+0.5)*deltay
-      izv=bvimbc(ix,iy).LO
-      WITH var(ix+*,iy+*,izv+*)      
-         delta=zz(izv)-wall(xx,yy,t)
-         v(0,0,0) = v(0,0,1)/(zz(izv+1)-zz(izv) + delta)*delta
-      END WITH
-      izv=tvimbc(ix,iy).HI
-      WITH var(ix+*,iy+*,izv+*)
-         delta= 2.-wall(xx,yy,t) - zz(izv)
-         v(0,0,0) = v(0,0,-1)/(zz(izv)-zz(izv-1)+delta)*delta
-      END WITH
-
-      xx=ix*deltax; yy=iy*deltay
-      izw=bwimbc(ix,iy).LO
-      WITH var(ix+*,iy+*,izw+*)
-         delta=zd(2*izw+1)-wall(xx,yy,t)
-         ww=bwbc(xx,yy,t)
-         w(0,0,0) = ww + (w(0,0,1)-ww)/(zd(2*(izw+1)+1)-zd(2*izw+1) + delta)*delta
-      END WITH
-      izw=twimbc(ix,iy).HI
-      WITH var(ix+*,iy+*,izw+*)
-         delta= 2.-wall(xx,yy,t) - zd(2*izw+1)
-         ww=twbc(xx,yy,t)
-         w(0,0,0) = ww + (w(0,0,-1)-ww)/(zd(2*izw+1)-zd(2*(izw-1)+1) + delta)*delta
-      END WITH
-
+   LOOP FOR ALL ix AND ALL iy
+    find_ind_panel(tensegrity,ix*deltax,iy*deltay,ix,iy,0,0)
+    DO var(ix,iy,iz).u=0 FOR iz=0 TO buimbc(ix,iy).LO-1; DO var(ix,iy,iz).u=0 FOR iz=tuimbc(ix,iy).HI+1 TO nz
+    DO var(ix,iy,iz).v=0 FOR iz=0 TO bvimbc(ix,iy).LO-1; DO var(ix,iy,iz).v=0 FOR iz=tvimbc(ix,iy).HI+1 TO nz
+    DO var(ix,iy,iz).w=bwbc(ix*deltax,iy*deltay,tensegrity) FOR iz=0 TO bwimbc(ix,iy).LO-1; DO var(ix,iy,iz).w=twbc(ix*deltax,iy*deltay,tensegrity) FOR iz=twimbc(ix,iy).HI+1 TO nz
    REPEAT
-!}
+
+   
+  IF t>=Tin AND it MOD itc = 0 THEN
+    INC nop 
+    savefield("/media/lorenzo/Hard Disk 2/output_codice_tesi/output/field_output/"myname"_"nop".field")
+    vec_to_csv_real(tensegrity.q_tilde, "/media/lorenzo/Hard Disk 2/output_codice_tesi/output/tensegrity_output/time_serie/q_tilde_"nop".csv")
+    WRITE TO UFR_file UFR_comp:1.15
+  END IF
 REPEAT timeloop
 
+CLOSE(UFR_file)
 
 ! Finalisations
 ! ------------------------
