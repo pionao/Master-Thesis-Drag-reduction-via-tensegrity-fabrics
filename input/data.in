@@ -9,5 +9,5 @@ Tin=0
 itc=40
 fromfield=0
 deltat=0.001
-time_max=10
-it_max=10000
+time_max=70
+it_max=250000

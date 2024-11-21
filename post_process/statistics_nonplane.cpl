@@ -1,0 +1,500 @@
+!USE rtchecks
+!--------------------------------------------------------------------------------------------------
+firstname=basename('undwall')
+! numero delle iterazioni del primo file che si vuole considerare:
+it0=INTEGER FROM PROMPT('First file iteration number?')    
+! numero di iterazioni tra 2 salvataggi che si vogliono considerare:      
+deltait=INTEGER FROM PROMPT('Number of iterations between 2 files?')
+! numero di file che si vogliono considerare: 
+nfiles=INTEGER FROM PROMPT('Number of files to consider?')
+!--------------------------------------------------------------------------------------------------
+
+INTEGER iit=it0
+INTEGER nx, ny, nz, it
+REAL Lx, Ly, Hz, nu, Ab, Kb, Cb, At, Kt, Ct, deltat, headx, heady
+
+FILE savedfield=OPENRO('../field/'firstname'_'it0'.field')
+IF savedfield#NULL THEN 
+   READ BY NAME FROM savedfield  nx, ny, nz, Lx, Ly, nu, deltat 
+   DO WHILE READ BY NAME FROM savedfield Ab, Kb, Cb, At, Kt, Ct
+   READ BY NAME FROM savedfield it, headx, heady
+ELSE 
+  WRITE 'Si deve prima lanciare la simulazione: STOP!'
+  STOP
+END IF
+CLOSE savedfield
+
+REAL zd(0..2*nz)=0
+VARS=STRUCTURED ARRAY(p,u,v,w) OF REAL
+ARRAY[1..nx,1..ny,0..nz] OF VARS var=0
+ARRAY[var.LO1..var.HI1,var.LO2..var.HI2] OF POINTER TO ARRAY(*) OF REAL Buimbc, Bvimbc, Bwimbc, Tuimbc, Tvimbc, Twimbc
+REAL t, deltax=Lx/nx, deltay=Ly/ny, deltaz
+ARRAY[-2..nx+3,-2..ny+3] OF REAL BWz=0, TWz=0
+
+INTEGER iz_
+REAL zz(0..nz)
+REAL u_mean(1..nx,0..nz,1..nfiles)=0
+REAL tke(1..nfiles)=0, CSVtke(1..nfiles)=0, Cf(1..nfiles)=0, BCf_y(1..ny,1..nfiles)=0, TCf_y(1..ny,1..nfiles)=0, Cf_corr(1..nfiles)=0
+REAL eps_uu(1..nfiles)=0, eps_vv(1..nfiles)=0, eps_ww(1..nfiles)=0, eps_uv(1..nfiles)=0, eps_uw(1..nfiles)=0, eps_vw(1..nfiles)=0, eps(1..nfiles)=0, Cp(1..nfiles)=0
+STRUCTURED ARRAY[BW,TW] OF REAL Wz(1..nfiles)=0
+REAL hx_mean=0, m=0, q=0, alpha=0, d=0, vel_tan=0
+REAL xp=0, zp=0, z_sw=0, z_se=0, z_M=0, d_sw=0, d_se=0, d_ne=0, d_nw=0, l_sw=0, l_se=0, l_ne=0, l_nw=0
+
+REAL ux2_AVGxy=0, uy2_AVGxy=0, uz2_AVGxy=0, vx2_AVGxy=0, vy2_AVGxy=0, vz2_AVGxy=0, wx2_AVGxy=0, wy2_AVGxy=0, wz2_AVGxy=0, 
+     uxvx_AVGxy=0, uyvy_AVGxy=0, uzvz_AVGxy=0, vxwx_AVGxy=0, vywy_AVGxy=0, vzwz_AVGxy=0, uxwx_AVGxy=0, uywy_AVGxy=0, uzwz_AVGxy=0,
+     ux2_AVGxy_old=0, uy2_AVGxy_old=0, uz2_AVGxy_old=0, vx2_AVGxy_old=0, vy2_AVGxy_old=0, vz2_AVGxy_old=0, wx2_AVGxy_old=0, wy2_AVGxy_old=0, wz2_AVGxy_old=0,
+     uxvx_AVGxy_old=0, uyvy_AVGxy_old=0, uzvz_AVGxy_old=0, vxwx_AVGxy_old=0, vywy_AVGxy_old=0, vzwz_AVGxy_old=0, uxwx_AVGxy_old=0, uywy_AVGxy_old=0, uzwz_AVGxy_old=0
+
+REAL FUNCTION Bisection[FUNCTION(REAL s)->BOOLEAN f; REAL VARIABLE x1, x2]
+  f1 = f(x1); f2 = f(x2)
+  IF f1 = f2 THEN ERROR 'Bisection point not included in the interval'
+  LOOP halve
+    RESULT=(x1+x2)/2
+    IF ABS(x2-x1)<1E-10 THEN EXIT Bisection
+    IF f(RESULT)=f1 THEN x1=RESULT ELSE x2=RESULT
+  REPEAT halve
+END Bisection
+
+SUBROUTINE calcimbc(FUNCTION(REAL x,y,z)->BOOLEAN InBody; TYPEOF(Buimbc) imbc^; INTEGER dix,diy,diz)
+ 
+  d2x=1/deltax^2; d2y=1/deltay^2
+
+  LOOP FOR ix=imbc.LO1 TO imbc.HI1 AND iy=imbc.LO2 TO imbc.HI2
+
+    x=(ix+0.5*dix)*deltax; y=(iy+0.5*diy)*deltay
+    REAL z
+    INTEGER izlo=0, izhi=0, k=0
+        
+    LOOP FOR iz=1 TO nz-1
+      IF NOT InBody[x,y,zd(2*iz+diz)] AND InBody[x,y,zd(2*(iz-1)+diz)] THEN
+        izlo=iz; izhi=izlo; k=izhi+1; z=zd(2*k+diz) 
+        LOOP WHILE {InBody[x+deltax,y,z] OR InBody[x-deltax,y,z] OR InBody[x,y+deltay,z] OR \
+                    InBody[x,y-deltay,z] OR InBody[x,y,zd(2*k+2+diz)] OR InBody[x,y,zd(2*k-2+diz)]} 
+          INC izhi; INC k; z=zd(2*k+diz) 
+        REPEAT
+        k=0
+      ELSE IF InBody[x,y,zd(2*iz+diz)] AND NOT InBody[x,y,zd(2*(iz-1)+diz)] THEN
+        izhi=iz-1; izlo=izhi; k=izhi-1; z=zd(2*k+diz)
+        LOOP WHILE {InBody[x+deltax,y,z] OR InBody[x-deltax,y,z] OR InBody[x,y+deltay,z] OR \
+                    InBody[x,y-deltay,z] OR InBody[x,y,zd(2*k+2+diz)] OR InBody[x,y,zd(2*k-2+diz)]}
+          izlo=~-1; k=~-1; z=zd(2*k+diz)
+        REPEAT
+        k=0
+      END IF
+    REPEAT
+
+    IF izlo=0 AND izhi=0 THEN
+      IF InBody[x,y,zd(0)] AND NOT InBody[x,y,zd(diz)] THEN izlo=1; izhi=1
+      IF InBody[x,y,zd(2*nz)] AND NOT InBody[x,y,zd(2*(nz-1)+diz)] THEN izlo=nz-1-diz; izhi=nz-1-diz 
+    END IF
+
+    imbc(ix,iy)=NEW ARRAY(izlo..izhi) OF REAL
+    
+    LOOP FOR iz=izlo TO izhi
+      z=zd(2*iz+diz)
+      deltazm=z-zd(2*iz-2+diz)
+      deltazp=zd(2*iz+2+diz)-z
+      d2zm=1/deltazm/[zd(2*iz+diz+1)-zd(2*iz+diz-1)]
+      d2zp=1/deltazp/[zd(2*iz+diz+1)-zd(2*iz+diz-1)]
+      REAL rsd=0
+
+      IF InBody(x,y,z) THEN rsd=1E20 ELSE
+        d=deltax
+        IF InBody[x-deltax,y,z] THEN d=x-Bisection[<InBody(s,y,z)>,x-deltax,x]
+        IF d=0 THEN rsd=1E20 ELSE rsd=~+deltax/d*d2x
+        d=deltax
+        IF InBody(x+deltax,y,z) THEN d=Bisection[<InBody(s,y,z)>,x,x+deltax]-x
+        IF d=0 THEN rsd=1E20 ELSE rsd=~+deltax/d*d2x
+
+        d=deltay
+        IF InBody(x,y-deltay,z) THEN d=y-Bisection[<InBody(x,s,z)>,y-deltay,y]
+        IF d=0 THEN rsd=1E20 ELSE rsd=~+deltay/d*d2y
+        d=deltay
+        IF InBody(x,y+deltay,z) THEN d=Bisection[<InBody(x,s,z)>,y,y+deltay]-y
+        IF d=0 THEN rsd=1E20 ELSE rsd=~+deltay/d*d2y
+
+        d=deltazm
+        IF InBody(x,y,z-deltazm) THEN d=z-Bisection[<InBody(x,y,s)>,z-deltazm,z]
+        IF d=0 THEN rsd=1E20 ELSE rsd=~+deltazm/d*d2zm
+        d=deltazp
+        IF InBody(x,y,z+deltazp) THEN d=Bisection[<InBody(x,y,s)>,z,z+deltazp]-z
+        IF d=0 THEN rsd=1E20 ELSE rsd=~+deltazp/d*d2zp
+      END IF
+
+      imbc(ix,iy,iz)=[rsd-2*d2x-2*d2y-d2zm-d2zp]*nu
+    REPEAT
+  
+  REPEAT
+
+END calcimbc
+
+WRITE 'nx	ny	nz	Lx	Ly	nu		deltat'
+WRITE nx, ny, nz, Lx, Ly, nu, deltat
+WRITE 'Ab	Kb	Cb	At	Kt	Ct'
+WRITE Ab, Kb, Cb, At, Kt, Ct
+WRITE 'it	headx		heady'  
+WRITE it, headx, heady
+
+INTEGER ix_m, iy_m, ix_M, iy_M
+REAL x_m, y_m, x_M, y_M, xm, ym, xM, yM
+
+BOOLEAN FUNCTION InBWall(REAL x,y,z)
+  ix_m=FLOOR(x/deltax); iy_m=FLOOR(y/deltay); ix_M=ix_m+1; iy_M=iy_m+1
+  x_m=ix_m*deltax; y_m=iy_m*deltay; x_M=ix_M*deltax; y_M=iy_M*deltay
+  xm=1-(x-x_m)/deltax; ym=1-(y-y_m)/deltay; xM=1-(x_M-x)/deltax; yM=1-(y_M-y)/deltay
+  IF ABS(xm)<1E-10 THEN xm=0 
+  IF ABS(ym)<1E-10 THEN ym=0 
+  IF ABS(xM)<1E-10 THEN xM=0 
+  IF ABS(yM)<1E-10 THEN yM=0 
+  RESULT=z<=BWz(ix_M,iy_M)*xM*yM + BWz(ix_m,iy_M)*xm*yM + BWz(ix_m,iy_m)*xm*ym + BWz(ix_M,iy_m)*xM*ym
+END InBWall
+
+BOOLEAN FUNCTION InTWall(REAL x,y,z)
+  ix_m=FLOOR(x/deltax); iy_m=FLOOR(y/deltay); ix_M=ix_m+1; iy_M=iy_m+1
+  x_m=ix_m*deltax; y_m=iy_m*deltay; x_M=ix_M*deltax; y_M=iy_M*deltay
+  xm=1-(x-x_m)/deltax; ym=1-(y-y_m)/deltay; xM=1-(x_M-x)/deltax; yM=1-(y_M-y)/deltay
+  IF ABS(xm)<1E-10 THEN xm=0 
+  IF ABS(ym)<1E-10 THEN ym=0 
+  IF ABS(xM)<1E-10 THEN xM=0 
+  IF ABS(yM)<1E-10 THEN yM=0 
+  RESULT=z>=TWz(ix_M,iy_M)*xM*yM + TWz(ix_m,iy_M)*xm*yM + TWz(ix_m,iy_m)*xm*ym + TWz(ix_M,iy_m)*xM*ym
+END InTWall
+
+LOOP FOR ifile=1 TO nfiles
+
+  myname=basename(''firstname'_'iit'')     
+  WRITE '#', myname, ifile, '/', nfiles CHAR(13) ./.
+
+  FILE savedfield=OPENRO('../field/'myname'.field')
+  IF savedfield#NULL THEN 
+   READ BY NAME FROM savedfield nx, ny, nz, Lx, Ly, nu, deltat
+   DO WHILE READ BY NAME FROM savedfield Ab, Kb, Cb, At, Kt, Ct
+   READ BY NAME FROM savedfield it, headx, heady
+   READ FROM savedfield
+   POINTER TO STORED STRUCTURE[CHAR header(POSITION(savedfield)); REAL z(0..2*nz)
+                               ARRAY(1..nx,1..ny,0..nz) OF VARS v] stored=savedfield
+    zd=stored.z
+    var=stored.v
+  ELSE
+    WRITE 'WARNING: file inesistente'
+  END IF
+  CLOSE savedfield
+
+  zz=^zd(2*(*))
+  zw=^zd(2*(*)+1)
+  u=var.u
+  v=var.v
+  w=var.w
+  p=var.p
+
+  deltaz=0; DO IF deltaz<zz(iz+1)-zz(iz) THEN deltaz=zz(iz+1)-zz(iz) FOR iz=0 TO nz DIV 2
+
+  hx_mean=~+headx
+
+  Hz=zz(nz DIV 2)
+  t=it*deltat
+
+  BWz=0; TWz=0
+
+  DO BWz(ix,iy)=-Ab/(Kb*Cb)*SIN[Kb*(ix*deltax-Cb*t)] FOR ix=1 TO nx AND iy=1 TO ny
+  DO TWz(ix,iy)=2+At/(Kt*Ct)*SIN[Kt*(ix*deltax-Ct*t)] FOR ix=1 TO nx AND iy=1 TO ny
+
+  LOOP FOR ix=-2 TO nx+3 EXCEPT ix>0 AND ix<nx+1 
+    LOOP FOR iy=1 TO ny
+      BWz(ix,iy)=BWz(ABS(nx-ABS(ix)),iy)
+      TWz(ix,iy)=TWz(ABS(nx-ABS(ix)),iy)
+    REPEAT
+  REPEAT
+  LOOP FOR ix=1 TO nx
+    LOOP FOR iy=-2 TO ny+3 EXCEPT iy>0 AND iy<ny+1 
+      BWz(ix,iy)=BWz(ix,ABS(ny-ABS(iy)))
+      TWz(ix,iy)=TWz(ix,ABS(ny-ABS(iy)))
+    REPEAT
+  REPEAT
+  LOOP FOR ix=-2 TO nx+3 EXCEPT ix>0 AND ix<nx+1
+    LOOP FOR iy=-2 TO ny+3 EXCEPT iy>0 AND iy<ny+1
+      BWz(ix,iy)=BWz(ABS(nx-ABS(ix)),ABS(ny-ABS(iy)))
+      TWz(ix,iy)=TWz(ABS(nx-ABS(ix)),ABS(ny-ABS(iy)))
+    REPEAT
+  REPEAT
+
+  calcimbc(InBWall,Buimbc,1,0,0)
+  calcimbc(InBWall,Bvimbc,0,1,0)
+  calcimbc(InBWall,Bwimbc,0,0,1)
+
+  calcimbc(InTWall,Tuimbc,1,0,0)
+  calcimbc(InTWall,Tvimbc,0,1,0)
+  calcimbc(InTWall,Twimbc,0,0,1)
+
+   ! profilo medio della velocità e della pressione
+   LOOP FOR ALL ix, iy
+      DO u_mean(ix,iz,ifile)=~+u(ix,iy,iz) FOR iz=Buimbc(ix,iy).LO TO Tuimbc(ix,iy).HI
+   REPEAT
+   u_mean(*,*,ifile)=u_mean(*,*,ifile)/ny
+
+   REAL u_prime(1..nx,1..ny,0..nz)=0, v_prime(1..nx,1..ny,0..nz)=0, \
+        w_prime(1..nx,1..ny,0..nz-1)=0, p_prime(1..nx,1..ny,1..nz-1)=0
+
+   ! componenti di fluttuazione: v e w non hanno profilo medio di velocità nel canale piano 
+   LOOP FOR ALL ix, iy
+      DO u_prime(ix,iy,iz)=u(ix,iy,iz)-u_mean(ix,iz,ifile) FOR iz=Buimbc(ix,iy).LO TO Tuimbc(ix,iy).HI
+   REPEAT
+   LOOP FOR ALL ix, iy
+      DO v_prime(ix,iy,iz)=v(ix,iy,iz) FOR iz=Bvimbc(ix,iy).LO TO Tvimbc(ix,iy).HI
+   REPEAT
+   LOOP FOR ALL ix, iy
+      DO w_prime(ix,iy,iz)=w(ix,iy,iz) FOR iz=Bwimbc(ix,iy).LO TO Twimbc(ix,iy).HI
+   REPEAT
+
+   ! energia cinetica turbolenta media
+   INTEGER count=0
+   DO 
+      INC count
+      tke(ifile)=~+({[u_prime(ix,iy,iz)+u_prime(ix+1,iy,iz)]/2}^2+ \
+                    {[v_prime(ix,iy,iz)+v_prime(ix,iy+1,iz)]/2}^2+ \
+                    {w_prime(ix+1,iy+1,iz-1)+[w_prime(ix+1,iy+1,iz)-w_prime(ix+1,iy+1,iz-1)]/[zw(iz)-zw(iz-1)]*[zz(iz)-zw(iz-1)]}^2-tke(ifile))/count
+   FOR ix=1 TO nx-1 AND iy=1 TO ny-1 AND iz=Bwimbc(ix,iy).LO+1 TO Twimbc(ix,iy).HI-1
+   tke(ifile)=tke(ifile)/2
+
+  count=0
+  DO 
+    INC count
+    !CSVtke(ifile)=~+({[v_prime(ix,iy,iz)+v_prime(ix,iy+1,iz)]/2}^2+ \
+    !                 {w_prime(ix+1,iy+1,iz-1)+[w_prime(ix+1,iy+1,iz)-w_prime(ix+1,iy+1,iz-1)]/[zw(iz)-zw(iz-1)]*[zz(iz)-zw(iz-1)]}^2-CSVtke(ifile))/count
+    CSVtke(ifile)=~+({w_prime(ix+1,iy+1,iz-1)+[w_prime(ix+1,iy+1,iz)-w_prime(ix+1,iy+1,iz-1)]/[zw(iz)-zw(iz-1)]*[zz(iz)-zw(iz-1)]}^2-CSVtke(ifile))/count
+  FOR ix=1 TO nx-1 AND iy=1 TO ny-1 AND iz=Bwimbc(ix,iy).LO TO Twimbc(ix,iy).HI
+  CSVtke(ifile)=CSVtke(ifile)/2
+
+  ! posizione media delle pareti
+  LOOP FOR ix=1 TO nx AND iy=1 TO ny
+    Wz(ifile).BW=~+BWz(ix,iy); Wz(ifile).TW=~+TWz(ix,iy)
+  REPEAT
+  Wz(ifile).BW=~/(nx*ny); Wz(ifile).TW=~/(nx*ny) 
+
+  ! dissipazione
+  LOOP FOR iz=1 TO nz-1
+    ux2_AVGxy=0; uy2_AVGxy=0; uz2_AVGxy=0; vx2_AVGxy=0; vy2_AVGxy=0; vz2_AVGxy=0; wx2_AVGxy=0; wy2_AVGxy=0; wz2_AVGxy=0
+    uxvx_AVGxy=0; uyvy_AVGxy=0; uzvz_AVGxy=0; vxwx_AVGxy=0; vywy_AVGxy=0; vzwz_AVGxy=0; uxwx_AVGxy=0; uywy_AVGxy=0; uzwz_AVGxy=0
+
+    LOOP FOR ix=1 TO nx-1
+      LOOP FOR iy=1 TO ny-1
+        IF iz>=Buimbc(ix,iy).LO AND iz<=Tuimbc(ix,iy).HI THEN
+          ux2_AVGxy=~+((u(ix+1,iy,iz)-u(ix,iy,iz))/deltax)**2
+          uy2_AVGxy=~+((u(ix,iy+1,iz)-u(ix,iy,iz))/deltay)**2
+          uz2_AVGxy=~+((u(ix,iy,iz+1)-u(ix,iy,iz))/(zz(iz+1)-zz(iz)))**2 
+        END IF 
+        
+        IF iz>=Bvimbc(ix,iy).LO AND iz<=Tvimbc(ix,iy).HI THEN
+          vx2_AVGxy=~+((v(ix+1,iy,iz)-v(ix,iy,iz))/deltax)**2
+          vy2_AVGxy=~+((v(ix,iy+1,iz)-v(ix,iy,iz))/deltay)**2
+          vz2_AVGxy=~+((v(ix,iy,iz+1)-v(ix,iy,iz))/(zz(iz+1)-zz(iz)))**2
+        END IF 
+
+        IF iz>=Bwimbc(ix,iy).LO AND iz<=Twimbc(ix,iy).HI THEN
+          wx2_AVGxy=~+((w(ix+1,iy,iz)-w(ix,iy,iz))/deltax)**2
+          wy2_AVGxy=~+((w(ix,iy+1,iz)-w(ix,iy,iz))/deltay)**2
+          wz2_AVGxy=~+((w(ix,iy,iz)-w(ix,iy,iz-1))/(zw(iz)-zw(iz-1)))**2
+        END IF 
+
+        IF iz>=Buimbc(ix,iy).LO AND iz<=Tuimbc(ix,iy).HI THEN
+          uxvx_AVGxy=~+((u(ix+1,iy,iz)-u(ix,iy,iz))/deltax)*((v(ix+1,iy,iz)-v(ix,iy,iz))/deltax)
+          uyvy_AVGxy=~+((u(ix,iy+1,iz)-u(ix,iy,iz))/deltay)*((v(ix,iy+1,iz)-v(ix,iy,iz))/deltay)
+          uzvz_AVGxy=~+((u(ix,iy,iz+1)-u(ix,iy,iz))/(zz(iz+1)-zz(iz)))*((v(ix,iy,iz+1)-v(ix,iy,iz))/(zz(iz+1)-zz(iz)))
+        END IF 
+
+        IF iz>=Buimbc(ix,iy).LO AND iz<=Tuimbc(ix,iy).HI THEN
+          uxwx_AVGxy=~+((u(ix+1,iy,iz)-u(ix,iy,iz))/deltax)*((w(ix+1,iy,iz)-w(ix,iy,iz))/deltax)
+          uywy_AVGxy=~+((u(ix,iy+1,iz)-u(ix,iy,iz))/deltay)*((w(ix,iy+1,iz)-w(ix,iy,iz))/deltay)
+          uzwz_AVGxy=~+((u(ix,iy,iz+1)-u(ix,iy,iz))/(zz(iz+1)-zz(iz)))*((w(ix,iy,iz)-w(ix,iy,iz-1))/(zw(iz)-zw(iz-1)))
+        END IF 
+
+        IF iz>=Bvimbc(ix,iy).LO AND iz<=Tvimbc(ix,iy).HI THEN
+          vxwx_AVGxy=~+((v(ix+1,iy,iz)-v(ix,iy,iz))/deltax)*((w(ix+1,iy,iz)-w(ix,iy,iz))/deltax)
+          vywy_AVGxy=~+((v(ix,iy+1,iz)-v(ix,iy,iz))/deltay)*((w(ix,iy+1,iz)-w(ix,iy,iz))/deltay)
+          vzwz_AVGxy=~+((v(ix,iy,iz+1)-v(ix,iy,iz))/(zz(iz+1)-zz(iz)))*((w(ix,iy,iz)-w(ix,iy,iz-1))/(zw(iz)-zw(iz-1)))
+        END IF 
+      REPEAT
+    REPEAT
+    eps_uu(ifile)=~+2*nu*(0.5*(ux2_AVGxy+ux2_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(uy2_AVGxy+uy2_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(uz2_AVGxy+uz2_AVGxy_old)*(zz(iz)-zz(iz-1)))/((nx-1)*(ny-1))
+    eps_vv(ifile)=~+2*nu*(0.5*(vx2_AVGxy+vx2_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(vy2_AVGxy+vy2_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(vz2_AVGxy+vz2_AVGxy_old)*(zz(iz)-zz(iz-1)))/((nx-1)*(ny-1))
+    eps_ww(ifile)=~+2*nu*(0.5*(wx2_AVGxy+wx2_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(wy2_AVGxy+wy2_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(wz2_AVGxy+wz2_AVGxy_old)*(zz(iz)-zz(iz-1)))/((nx-1)*(ny-1))
+    eps_uv(ifile)=~+2*nu*(0.5*(uxvx_AVGxy+uxvx_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(uyvy_AVGxy+uyvy_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(uzvz_AVGxy+uzvz_AVGxy_old)*(zz(iz)-zz(iz-1)))/((nx-1)*(ny-1))
+    eps_uw(ifile)=~+2*nu*(0.5*(uxwx_AVGxy+uxwx_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(uywy_AVGxy+uywy_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(uzwz_AVGxy+uzwz_AVGxy_old)*(zz(iz)-zz(iz-1)))/((nx-1)*(ny-1))
+    eps_vw(ifile)=~+2*nu*(0.5*(vxwx_AVGxy+vxwx_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(vywy_AVGxy+vywy_AVGxy_old)*(zz(iz)-zz(iz-1))+0.5*(vzwz_AVGxy+vzwz_AVGxy_old)*(zz(iz)-zz(iz-1)))/((nx-1)*(ny-1))
+
+    ux2_AVGxy_old=ux2_AVGxy; uy2_AVGxy_old=uy2_AVGxy; uz2_AVGxy_old=uz2_AVGxy; vx2_AVGxy_old=vx2_AVGxy; vy2_AVGxy_old=vy2_AVGxy; vz2_AVGxy_old=vz2_AVGxy; wx2_AVGxy_old=wx2_AVGxy; wy2_AVGxy_old=wy2_AVGxy; wz2_AVGxy_old=wz2_AVGxy
+    uxvx_AVGxy_old=uxvx_AVGxy; uyvy_AVGxy_old=uyvy_AVGxy; uzvz_AVGxy_old=uzvz_AVGxy; vxwx_AVGxy_old=vxwx_AVGxy; vywy_AVGxy_old=vywy_AVGxy; vzwz_AVGxy_old=vzwz_AVGxy; uxwx_AVGxy_old=uxwx_AVGxy; uywy_AVGxy_old=uywy_AVGxy; uzwz_AVGxy_old=uzwz_AVGxy
+  REPEAT
+  eps_uu(ifile)=~/2; eps_vv(ifile)=~/2; eps_ww(ifile)=~/2; eps_uv(ifile)=~/2; eps_uw(ifile)=~/2; eps_vw(ifile)=~/2
+  eps(ifile)=eps_uu(ifile)+eps_vv(ifile)+eps_ww(ifile)+eps_uv(ifile)+eps_uw(ifile)+eps_vw(ifile)
+  !WRITE eps_uu(ifile), eps_vv(ifile), eps_ww(ifile), eps_uv(ifile), eps_uw(ifile), eps_vw(ifile), eps(ifile)
+
+  !Calcolo Cf
+  DO
+    IF (zz(Buimbc(ix,iy).LO)-0.5*(BWz(ix,iy)+BWz(ix+1,iy)))<deltaz THEN Cf(ifile)=~+(nu*(u(ix,iy,Buimbc(ix,iy).LO+1)/(zz(Buimbc(ix,iy).LO+1)-0.5*(BWz(ix,iy)+BWz(ix+1,iy))))) ELSE Cf(ifile)=~+(nu*(u(ix,iy,Buimbc(ix,iy).LO)/(zz(Buimbc(ix,iy).LO)-0.5*(BWz(ix,iy)+BWz(ix+1,iy)))))
+    IF (0.5*(TWz(ix,iy)+TWz(ix+1,iy))-zz(Tuimbc(ix,iy).HI))<deltaz THEN Cf(ifile)=~+(nu*(u(ix,iy,Tuimbc(ix,iy).HI-1)/(0.5*(TWz(ix,iy)+TWz(ix+1,iy))-zz(Tuimbc(ix,iy).HI-1)))) ELSE Cf(ifile)=~+(nu*(u(ix,iy,Tuimbc(ix,iy).HI)/(0.5*(TWz(ix,iy)+TWz(ix+1,iy))-zz(Tuimbc(ix,iy).HI))))
+
+    IF (zz(Buimbc(ix,iy).LO)-0.5*(BWz(ix,iy)+BWz(ix+1,iy)))<deltaz THEN BCf_y(iy,ifile)=~+2*(nu*(u(ix,iy,Buimbc(ix,iy).LO+1)/(zz(Buimbc(ix,iy).LO+1)-0.5*(BWz(ix,iy)+BWz(ix+1,iy))))) ELSE BCf_y(iy,ifile)=~+2*(nu*(u(ix,iy,Buimbc(ix,iy).LO)/(zz(Buimbc(ix,iy).LO)-0.5*(BWz(ix,iy)+BWz(ix+1,iy))))) 
+    IF (0.5*(TWz(ix,iy)+TWz(ix+1,iy))-zz(Tuimbc(ix,iy).HI))<deltaz THEN TCf_y(iy,ifile)=~+2*(nu*(u(ix,iy,Tuimbc(ix,iy).HI-1)/(0.5*(TWz(ix,iy)+TWz(ix+1,iy))-zz(Tuimbc(ix,iy).HI-1)))) ELSE TCf_y(iy,ifile)=~+2*(nu*(u(ix,iy,Tuimbc(ix,iy).HI)/(0.5*(TWz(ix,iy)+TWz(ix+1,iy))-zz(Tuimbc(ix,iy).HI))))
+  FOR ix=1 TO nx-1 AND iy=1 TO ny
+  Cf(ifile)=~/[(nx-1)*ny]
+  BCf_y(1..ny,ifile)=~/(nx-1); TCf_y(1..ny,ifile)=~/(nx-1)
+
+  !Calcolo Cf corretto
+  DO
+    m=(BWz(ix+1,iy)-BWz(ix,iy))/deltax
+    q=((ix+1)*deltax*BWz(ix,iy)-ix*deltax*BWz(ix+1,iy))/deltax
+    alpha=ATAN(m)
+    d=ABS(zz(Buimbc(ix,iy).LO)-(m*(ix+0.5)*deltax+q))/SQRT(1+m^2)
+    xp=(ix+0.5)*deltax; zp=zz(Buimbc(ix,iy).LO)
+    x_m=ix*deltax; x_M=(ix+1)*deltax; z_sw=MAX(zw(Buimbc(ix,iy).LO-1),BWz(ix,iy)); z_se=MAX(zw(Buimbc(ix+1,iy).LO-1),BWz(ix+1,iy)); z_M=zw(Buimbc(ix,iy).LO)
+    d_sw=SQRT((xp-x_m)^2+(zp-z_sw)^2); d_se=SQRT((xp-x_M)^2+(zp-z_se)^2); d_ne=SQRT((xp-x_M)^2+(zp-z_M)^2); d_nw=SQRT((xp-x_m)^2+(zp-z_M)^2)
+    l_sw=d_sw/(d_sw+d_se+d_ne+d_nw); l_se=d_se/(d_sw+d_se+d_ne+d_nw); l_ne=d_ne/(d_sw+d_se+d_ne+d_nw); l_nw=d_nw/(d_sw+d_se+d_ne+d_nw)
+    vel_tan=u(ix,iy,Buimbc(ix,iy).LO)*ABS(COS(alpha))-(l_sw*w(ix,iy,Buimbc(ix,iy).LO-1)+l_se*w(ix+1,iy,Buimbc(ix+1,iy).LO-1)+l_ne*w(ix+1,iy,Buimbc(ix+1,iy).LO)+l_nw*w(ix,iy,Buimbc(ix,iy).LO))*ABS(SIN(alpha))
+    IF d<deltaz THEN
+      d=ABS(zz(Buimbc(ix,iy).LO+1)-(m*(ix+0.5)*deltax+q))/SQRT(1+m^2)
+      xp=(ix+0.5)*deltax; zp=zz(Buimbc(ix,iy).LO+1)
+      x_m=ix*deltax; x_M=(ix+1)*deltax; z_sw=MAX(zw(Buimbc(ix,iy).LO),BWz(ix,iy)); z_se=MAX(zw(Buimbc(ix+1,iy).LO),BWz(ix+1,iy)); z_M=zw(Buimbc(ix,iy).LO+1)
+      d_sw=SQRT((xp-x_m)^2+(zp-z_sw)^2); d_se=SQRT((xp-x_M)^2+(zp-z_se)^2); d_ne=SQRT((xp-x_M)^2+(zp-z_M)^2); d_nw=SQRT((xp-x_m)^2+(zp-z_M)^2)
+      l_sw=d_sw/(d_sw+d_se+d_ne+d_nw); l_se=d_se/(d_sw+d_se+d_ne+d_nw); l_ne=d_ne/(d_sw+d_se+d_ne+d_nw); l_nw=d_nw/(d_sw+d_se+d_ne+d_nw)
+      vel_tan=u(ix,iy,Buimbc(ix,iy).LO+1)*ABS(COS(alpha))-(l_sw*w(ix,iy,Buimbc(ix,iy).LO)+l_se*w(ix+1,iy,Buimbc(ix+1,iy).LO)+l_ne*w(ix+1,iy,Buimbc(ix+1,iy).LO+1)+l_nw*w(ix,iy,Buimbc(ix,iy).LO+1))*ABS(SIN(alpha))
+    END IF
+    Cf_corr(ifile)=~+nu*vel_tan/d
+
+    m=(TWz(ix+1,iy)-TWz(ix,iy))/deltax
+    q=((ix+1)*deltax*TWz(ix,iy)-ix*deltax*TWz(ix+1,iy))/deltax
+    alpha=ATAN(m)
+    d=ABS(zz(Tuimbc(ix,iy).HI)-(m*(ix+0.5)*deltax+q))/SQRT(1+m^2)
+    xp=(ix+0.5)*deltax; zp=zz(Tuimbc(ix,iy).HI)
+    x_m=ix*deltax; x_M=(ix+1)*deltax; z_sw=MIN(zw(Tuimbc(ix,iy).HI+1),TWz(ix,iy)); z_se=MIN(zw(Tuimbc(ix+1,iy).HI+1),TWz(ix+1,iy)); z_M=zw(Tuimbc(ix,iy).HI)
+    d_sw=SQRT((xp-x_m)^2+(zp-z_sw)^2); d_se=SQRT((xp-x_M)^2+(zp-z_se)^2); d_ne=SQRT((xp-x_M)^2+(zp-z_M)^2); d_nw=SQRT((xp-x_m)^2+(zp-z_M)^2)
+    l_sw=d_sw/(d_sw+d_se+d_ne+d_nw); l_se=d_se/(d_sw+d_se+d_ne+d_nw); l_ne=d_ne/(d_sw+d_se+d_ne+d_nw); l_nw=d_nw/(d_sw+d_se+d_ne+d_nw)
+    vel_tan=u(ix,iy,Tuimbc(ix,iy).HI)*ABS(COS(alpha))-(l_sw*w(ix,iy,Tuimbc(ix,iy).HI+1)+l_se*w(ix+1,iy,Tuimbc(ix+1,iy).HI+1)+l_ne*w(ix+1,iy,Tuimbc(ix+1,iy).HI)+l_nw*w(ix,iy,Tuimbc(ix,iy).HI))*ABS(SIN(alpha))
+    IF d<deltaz THEN
+      d=ABS(zz(Tuimbc(ix,iy).HI-1)-(m*(ix+0.5)*deltax+q))/SQRT(1+m^2)
+      xp=(ix+0.5)*deltax; zp=zz(Tuimbc(ix,iy).HI-1)
+      x_m=ix*deltax; x_M=(ix+1)*deltax; z_sw=MIN(zw(Tuimbc(ix,iy).HI),TWz(ix,iy)); z_se=MIN(zw(Tuimbc(ix+1,iy).HI),TWz(ix+1,iy)); z_M=zw(Tuimbc(ix,iy).HI+1)
+      d_sw=SQRT((xp-x_m)^2+(zp-z_sw)^2); d_se=SQRT((xp-x_M)^2+(zp-z_se)^2); d_ne=SQRT((xp-x_M)^2+(zp-z_M)^2); d_nw=SQRT((xp-x_m)^2+(zp-z_M)^2)
+      l_sw=d_sw/(d_sw+d_se+d_ne+d_nw); l_se=d_se/(d_sw+d_se+d_ne+d_nw); l_ne=d_ne/(d_sw+d_se+d_ne+d_nw); l_nw=d_nw/(d_sw+d_se+d_ne+d_nw)
+      vel_tan=u(ix,iy,Tuimbc(ix,iy).HI-1)*ABS(COS(alpha))-(l_sw*w(ix,iy,Tuimbc(ix,iy).HI)+l_se*w(ix+1,iy,Tuimbc(ix+1,iy).HI)+l_ne*w(ix+1,iy,Tuimbc(ix+1,iy).HI-1)+l_nw*w(ix,iy,Tuimbc(ix,iy).HI-1))*ABS(SIN(alpha))
+    END IF
+    Cf_corr(ifile)=~+nu*vel_tan/d
+  FOR ix=1 TO nx-1 AND iy=1 TO ny
+  Cf_corr(ifile)=~/[(nx-1)*ny]
+
+  !calcolo Cp
+  DO
+    m=(BWz(ix+1,iy)-BWz(ix-1,iy))/(2*deltax)
+    alpha=ATAN(m)
+    iz_=0
+    DO INC iz_ UNTIL zz(iz_)>BWz(ix,iy)
+    Cp(ifile)=~+p(ix,iy,iz_)*SIN(alpha)
+
+    m=(TWz(ix+1,iy)-TWz(ix-1,iy))/(2*deltax) 
+    alpha=ATAN(m)
+    iz_=nz
+    DO iz_=~-1 UNTIL zz(iz_)<TWz(ix,iy)
+    Cp(ifile)=~-p(ix,iy,iz_)*SIN(alpha)
+  FOR ix=2 TO nx-1 AND iy=1 TO ny
+  Cp(ifile)=~/[(nx-2)*ny]
+
+  REAL Ppx=0
+  pcheck=OPEN('pcheck.dat') 
+  LOOP FOR ix=2 TO nx-1 
+    m=(BWz(ix+1,ny DIV 2)-BWz(ix-1,ny DIV 2))/(2*deltax)
+    alpha=ATAN(m)
+    iz_=0
+    DO INC iz_ UNTIL zz(iz_)>BWz(ix,ny DIV 2)
+    Ppx=~+p(ix,ny DIV 2,iz_)*SIN(alpha)
+    WRITE TO pcheck ix*deltax, BWz(ix,ny DIV 2), alpha, p(ix,ny DIV 2,iz_), p(ix,ny DIV 2,iz_)*SIN(alpha), Ppx
+  REPEAT
+  CLOSE pcheck
+
+  !WRITE '2hx', 2*headx, 'eps', eps(ifile), 'Cf', Cf(ifile), 'Cf_corrected', Cf_corr(ifile), 'Cp', Cp(ifile)
+
+  LOOP FOR ALL ix, iy
+    FREE Buimbc(ix,iy), Bvimbc(ix,iy), Bwimbc(ix,iy), Tuimbc(ix,iy), Tvimbc(ix,iy), Twimbc(ix,iy)
+  REPEAT
+  iit=~+deltait
+
+REPEAT
+
+! medie temporali 
+
+REAL deltatime=deltait*deltat
+REAL time(1..nfiles)
+REAL u_mean_(1..nx,0..nz)=0
+REAL tke_=0, CSVtke_=0
+REAL eps_=0, Cf_=0, BCf_y_(1..ny)=0, TCf_y_(1..ny)=0, Cf_corr_=0, Cp_=0
+time(1)=it0*deltat
+DO time(i)=time(i-1)+deltait*deltat FOR i=2 TO nfiles
+
+IF nfiles>1 THEN
+  LOOP FOR ifile=1 TO nfiles-1
+    DO u_mean_(ix,iz)=~+[u_mean(ix,iz,ifile)+u_mean(ix,iz,ifile+1)]*deltatime/2 FOR ALL ix, iz
+    DO BCf_y_(iy)=~+[BCf_y(iy,ifile)+BCf_y(iy,ifile+1)]*deltatime/2 TCf_y_(iy)=~+[TCf_y(iy,ifile)+TCf_y(iy,ifile+1)]*deltatime/2 FOR ALL iy
+    tke_=~+[tke(ifile)+tke(ifile+1)]*deltatime/2
+    CSVtke_=~+[CSVtke(ifile)+CSVtke(ifile+1)]*deltatime/2
+    eps_=~+[eps(ifile)+eps(ifile+1)]*deltatime/2
+    Cf_=~+[Cf(ifile)+Cf(ifile+1)]*deltatime/2
+    Cf_corr_=~+[Cf_corr(ifile)+Cf_corr(ifile+1)]*deltatime/2
+    Cp_=~+[Cp(ifile)+Cp(ifile+1)]*deltatime/2
+  REPEAT
+  DO u_mean_(ix,iz)=u_mean_(ix,iz)/[time(nfiles)-time(1)] FOR ALL ix, iz
+  DO BCf_y_(iy)=BCf_y_(iy)/[time(nfiles)-time(1)] TCf_y_(iy)=TCf_y_(iy)/[time(nfiles)-time(1)] FOR ALL iy
+  tke_=tke_/[time(nfiles)-time(1)]
+  CSVtke_=CSVtke_/[time(nfiles)-time(1)]
+  eps_=eps_/[time(nfiles)-time(1)]
+  Cf_=Cf_/[time(nfiles)-time(1)]
+  Cf_corr_=Cf_corr_/[time(nfiles)-time(1)]
+  Cp_=Cp_/[time(nfiles)-time(1)]
+ELSE
+  u_mean_(1..nx,0..nz)=u_mean(1..nx,0..nz,1)
+  BCf_y_(1..ny)=BCf_y(1..ny,1); TCf_y_(1..ny)=TCf_y(1..ny,1)
+  tke_=tke(1)
+  CSVtke_=CSVtke(1)
+  eps_=eps(1)
+  Cf_=Cf(1)
+  Cf_corr_=Cf_corr(1)
+  Cp_=Cp(1)
+END IF
+
+hx_mean=~/nfiles
+
+WRITE
+WRITE 'epsilon=', eps_, 'Cf=', Cf_corr_, 'Cp=', Cp_, 'Wi', eps_-Cf_corr_-Cp_, '2*headx_mean=', 2*hx_mean
+WRITE 'tke=', tke_, 'Cross-stream tke=', CSVtke_
+
+SUBROUTINE plot2d(REAL x(*),y(*); INTEGER nome)
+
+  IF LENGTH(x)#LENGTH(y) THEN 
+    ERROR 'Array size mismatch' 
+  ELSE
+    filedat=OPEN('data_'nome'.dat') 
+    DO  WRITE TO filedat x(ix):1.15, ' ', y(ix):1.15 FOR ALL ix
+  END IF
+
+END plot2d
+
+SUBROUTINE plot3(REAL x(*),y(*),z(*); INTEGER nome)
+
+  IF LENGTH(x)#LENGTH(y) OR LENGTH(x)#LENGTH(z) THEN 
+    ERROR 'Array size mismatch' 
+  ELSE
+    filedat=OPEN('data_'nome'.dat') 
+    DO  WRITE TO filedat x(ix):1.15, ' ', y(ix):1.15, ' ', z(ix):1.15 FOR ALL ix
+  END IF
+
+END plot3
+
+REAL y_vect(1..ny)=0
+y_vect(1)=deltay; DO y_vect(iy)=y_vect(iy-1)+deltay FOR iy=2 TO ny
+
+plot3(time,tke,CSVtke,1)
+plot3(BCf_y_,TCf_y_,y_vect,2)
+
+outdata=OPEN('outdata.dat') 
+LOOP FOR ifile=1 TO nfiles
+  WRITE TO outdata time(ifile), eps(ifile), Cf(ifile), Cp(ifile)
+REPEAT
+CLOSE outdata

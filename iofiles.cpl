@@ -23,9 +23,9 @@ ELSE
   IF WALLS=2 THEN
     DO zd(iz)=iz/nz FOR iz=0 TO 2*nz
     !DO zd(iz)=zd(iz) - ABS(a/(k*c)) FOR iz=0 TO 2*nz 
-    !DO var(ix,iy,iz).u=3/2*zz(iz)*(2-zz(iz)); var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO 2*nz DIV 2
+    !DO var(ix,iy,iz).u=3/2*zz(iz)*(2-zz(iz)); var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO 2*nz DIV 2 
     !DO var(ix,iy,iz).u=8/7*zz(iz)^(1/7)*(1+0.02*COS(5*PI*zz(iz)))-Uconv; var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO nz DIV 2
-!    DO var(ix,iy,iz).u=0; var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO nz DIV 2
+    !DO var(ix,iy,iz).u=0; var(ix,iy,nz-iz).u=var(ix,iy,iz).u FOR ALL ix,iy AND iz=0 TO nz DIV 2
   ELSE
     DO zd(iz)=1-scale[1-iz/(2*nz-1)]/scale(1) FOR iz=0 TO 2*nz
     !DO var(ix,iy,iz).u=8/7*zz(iz)^(1/7)*(1+0.02*COS(5*PI*zz(iz)))-Uconv FOR ALL ix,iy AND iz=0 TO nz
@@ -60,7 +60,7 @@ END savefield
 
 
 
-SUBROUTINE output
+SUBROUTINE output(REAL UFR_pntr^)
 !  IF it MOD 5 = 0 THEN
     STRUCTURED ARRAY(x,y) OF REAL Q=0; INTEGER count=0
     LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
@@ -69,6 +69,7 @@ SUBROUTINE output
       Q.y=~+({SUM [var(ix,iy,iz).v]*[zd(2*iz+1)-zd(2*iz-1)] FOR iz=1 TO nz-1}-Q.y)/count
     REPEAT
     accumulate(Q)
+    UFR_pntr = Q.x
     IF has_terminal THEN
       WRITE it,t, headx:1.15, heady:1.15, Q.x/nprocx/nprocy:1.15, Q.y/nprocx/nprocy:1.15
       FLUSH stdout
@@ -83,3 +84,28 @@ SUBROUTINE output
 !)
 !  END IF
 END output
+
+!{SUBROUTINE output
+!  IF it MOD 5 = 0 THEN
+    STRUCTURED ARRAY(x,y) OF REAL Q=0; INTEGER count=0
+    LOOP FOR ix=var.LO1+1 TO var.HI1-1 AND iy=var.LO2+1 TO var.HI2-1
+      INC count
+      Q.x=~+({SUM [var(ix,iy,iz).u]*[zd(2*iz+1)-zd(2*iz-1)] FOR iz=1 TO nz-1}-Q.x)/count
+      Q.y=~+({SUM [var(ix,iy,iz).v]*[zd(2*iz+1)-zd(2*iz-1)] FOR iz=1 TO nz-1}-Q.y)/count
+    REPEAT
+    accumulate(Q)
+    IF has_terminal THEN
+      WRITE it,t, headx:1.15, heady:1.15, Q.x/nprocx/nprocy:1.15, Q.y/nprocx/nprocy:1.15
+
+      FLUSH stdout
+    END IF
+
+!(
+  ELSE
+    IF has_terminal THEN
+      WRITE it,t, headx:1.15, heady:1.15, cfl, deltat
+      FLUSH stdout
+    END IF
+!)
+!  END IF
+END output!}

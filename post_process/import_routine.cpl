@@ -1,0 +1,102 @@
+!USE rtchecks
+
+FUNCTION csv_dim_count(STRING input_path)->ARRAY(2) OF INTEGER
+    INTEGER n1=0, n2=0
+    STRING line
+    input_file = OPEN(input_path)
+    READ FROM input_file line
+    INC(n1)
+    INC(n2)
+    LOOP FOR i = 1 TO line.HI
+        IF line(i) = "," THEN
+            INC(n2)
+        END IF
+    REPEAT
+    DO
+        INC(n1)
+        READ FROM input_file
+    WHILE NOT(EOF(input_file))
+    FREE input_file
+    ARRAY(2) OF INTEGER dim = (n1, n2)
+    RETURN dim
+END csv_dim_count
+
+SUBROUTINE import_csv_int(ARRAY(*,*) OF INTEGER arr^; ARRAY(2) OF INTEGER dim; STRING input_path)
+input_file = OPEN(input_path)
+STRING line
+INTEGER ind=0
+INTEGER num=0
+    LOOP FOR i = 1 TO dim(1)
+        READ FROM input_file line
+        LOOP FOR j = 1 TO dim(2)
+            LOOP WHILE ind<=line.HI AND line(ind)#"," 
+                IF line(ind)#" " THEN 
+                    num = ~*10 + (line(ind)-48)
+                END IF
+                INC(ind)
+            REPEAT
+            arr(i,j) = num
+            num = 0
+            INC(ind)
+        REPEAT
+        ind = 0
+    REPEAT
+FREE(input_file)
+END import_csv_int
+
+SUBROUTINE import_csv_real(ARRAY(*,*) OF REAL arr^; ARRAY(2) OF INTEGER dim; STRING input_path)
+input_file = OPEN(input_path)
+STRING line
+INTEGER ind=0, point_flag=0, point_count=0, e_flag = 0, e_count=0, sign=1
+INTEGER num=0, exp=0
+    LOOP FOR i = 1 TO dim(1)
+        READ FROM input_file line
+        LOOP FOR j = 1 TO dim(2)
+            LOOP WHILE ind<=line.HI AND line(ind)#"," 
+                IF line(ind)#" " AND line(ind)#"." AND line(ind)#'e' AND line(ind)#'-' AND e_flag=0 THEN 
+                    num = ~*10 + (line(ind)-48)
+                END IF
+                IF line(ind)#" " AND line(ind)#"." AND line(ind)#'e' AND line(ind)#'-' AND e_flag#0 THEN 
+                    exp = ~*10 + (line(ind)-48)
+                END IF
+                IF point_flag=1 THEN
+                    INC(point_count)
+                END IF
+                IF line(ind)="." THEN
+                    point_flag=1
+                END IF
+                IF e_flag#0 THEN
+                    INC e_count
+                END IF
+                IF line(ind)="e" THEN
+                    e_flag=1
+                END IF
+                IF line(ind)="-" AND e_flag=0 THEN
+                    sign=-1
+                END IF
+                IF line(ind)="-" AND e_flag=1 THEN
+                    e_flag=-1
+                    DEC e_count
+                END IF
+                INC(ind)
+            REPEAT
+            IF e_flag#0 THEN point_count = ~- FLOOR((2-(e_flag-1)))
+            IF point_flag = 1 THEN
+                arr(i,j) = sign * num/(10.0^point_count) * 10.0^(e_flag*exp)
+            ELSE IF point_flag = 0 AND e_flag#0 THEN
+                arr(i,j) = sign * num * 10.0^(e_flag*exp)
+            ELSE 
+                arr(i,j) = num
+            END IF
+            point_count = 0
+            point_flag = 0
+            num = 0
+            e_flag = 0
+            exp = 0
+            sign = 1
+            INC(ind)
+        REPEAT
+        ind = 0
+    REPEAT
+FREE(input_file)
+END import_csv_real

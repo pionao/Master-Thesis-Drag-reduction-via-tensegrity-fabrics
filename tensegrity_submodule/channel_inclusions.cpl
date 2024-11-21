@@ -7,7 +7,6 @@ TENSEGRITY = STRUCTURE[ INTEGER CONSTANT nx,nz,n_C,n_B,n_T,n_G,n_N,n_N_dof,n_T_d
                          REAL Lx,Lz,rho_b,k,sigma,h,r,l_b,I_0,alpha_1,l_per,l_v_1,l_h_1,
                               l_u_l,l_u_s,l_u_l_0,l_h_0,l_u_s_0,l_i_0,l_i_norm,
                               lambda_1,lambda_2,lambda_3,dA,d_lambda,normal_norm; 
-                         REAL rho_b_start, sigma_start, k_start, rho_b_end, sigma_end, k_end;
                          ARRAY(n_B,2) OF INTEGER B_con;
                          ARRAY(n_T,2) OF INTEGER T_con;
                          ARRAY(n_G,3) OF INTEGER ghost_nodes;
@@ -217,7 +216,12 @@ SUBROUTINE df_comp(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, delt
     ERROR("The integration point is out of the computational domain!")
   END IF
 
-  REAL du_dx=0, du_dy=0, du_dz, dv_dx=0, dv_dy=0, dv_dz, dw_dx, dw_dy, dw_dz
+  REAL du_dx=0, du_dy=0, du_dz, dv_dx=0, dv_dy=0, dv_dz=0, dw_dx=0, dw_dy=0, dw_dz=0
+
+
+    !{
+
+
 
   !du_dx = this.dlambda1_dx*this.X_1_vel(3) + this.dlambda2_dx*this.X_2_vel(3) + this.dlambda3_dx*this.X_3_vel(3)
   !dv_dx = this.dlambda1_dx*this.X_1_vel(1) + this.dlambda2_dx*this.X_2_vel(1) + this.dlambda3_dx*this.X_3_vel(1)
@@ -345,8 +349,6 @@ SUBROUTINE df_comp(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, delt
 
   dw_dz = (w - this.lambda_1*this.X_1_vel(2) - this.lambda_2*this.X_2_vel(2) - this.lambda_3*this.X_3_vel(2)) / deltaz
 
-  !WRITE u, this.X_1_vel(3), this.X_2_vel(3), this.X_3_vel(3), du_dz
-
   ! Calcolo p
 
   REAL dn = 1*SQRT(deltax*deltax+deltay*deltay+deltaz*deltaz)
@@ -393,9 +395,6 @@ SUBROUTINE df_comp(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, delt
   c_7 = var(ixp+1,iyp+1,izp+1).p - var(ixp,iyp+1,izp+1).p - var(ixp+1,iyp,izp+1).p - var(ixp+1,iyp+1,izp).p + var(ixp+1,iyp,izp).p + var(ixp,iyp,izp+1).p + var(ixp,iyp+1,izp).p - var(ixp,iyp,izp).p
 
   REAL p = c_0 + c_1*Dx + c_2*Dy + c_3*Dz + c_4*Dx*Dy + c_5*Dy*Dz + c_6*Dx*Dz + c_7*Dx*Dy*Dz
-  !p =  0.5*COS(2*3.14159265359*(this.x(3)-2*this.time))
-  !WRITE var(ixp,iyp,izp).p, var(ixp+1,iyp,izp).p, var(ixp,iyp+1,izp).p, var(ixp,iyp,izp+1).p, var(ixp+1,iyp+1,izp).p, var(ixp+1,iyp,izp+1).p, var(ixp,iyp+1,izp+1).p, var(ixp+1,iyp+1,izp+1).p
-  !WRITE p
 
   REAL sigma_11, sigma_12, sigma_13, sigma_22, sigma_23, sigma_33
   sigma_11 = -p + 2*this.nu*du_dx
@@ -408,9 +407,6 @@ SUBROUTINE df_comp(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, delt
   this.df(3) = rho_f*(sigma_11*this.normal(3)+sigma_12*this.normal(1)+sigma_13*this.normal(2))*this.dA
   this.df(1) = rho_f*(sigma_12*this.normal(3)+sigma_22*this.normal(1)+sigma_23*this.normal(2))*this.dA
   this.df(2) = rho_f*(sigma_13*this.normal(3)+sigma_23*this.normal(1)+sigma_33*this.normal(2))*this.dA
-
-  !WRITE this.df
-  !WRITE -p, 2*this.nu*dw_dz
 END df_comp
 
 SUBROUTINE f_ext_sub(TENSEGRITY this^; ARRAY(*,*,*) OF VARS var; REAL deltax, deltay, deltaz)
@@ -2237,7 +2233,6 @@ END bar_coord_2D
 
 SUBROUTINE find_ind_panel(TENSEGRITY this^; REAL x,y; INTEGER ix,iy,dix,diy)
   INTEGER ind = this.pan_ind_mat(2*ix+dix, 2*iy+diy)
-  !WRITE 2*ix+dix, 2*iy+diy, ind
   REAL aux_x = x, aux_y = y
 
   IF aux_x < 0 THEN
@@ -2314,7 +2309,6 @@ SUBROUTINE find_ind_panel(TENSEGRITY this^; REAL x,y; INTEGER ix,iy,dix,diy)
       this.bar_weights(3) < 0 OR this.bar_weights(3) > 1) THEN
 
     ind = 0
-    !WRITE this.bar_weights
     LOOP WHILE ind >= 0 AND ind <= this.n_P AND ((this.bar_weights(1) < 0 OR this.bar_weights(1) > 1 OR 
                                                   this.bar_weights(2) < 0 OR this.bar_weights(2) > 1 OR 
                                                   this.bar_weights(3) < 0 OR this.bar_weights(3) > 1))
